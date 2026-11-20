@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kirisame.cyanautomation.dev/contracts/v1/publication-request.schema.json",
+  "title": "Kirisame publication request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "publicationId", "runId", "repository", "mode", "baseRef", "baseSha", "headRef", "artifact", "artifactDigest"],
+  "properties": {
+    "contractVersion": { "const": "1" },
+    "publicationId": { "$ref": "#/$defs/uuid7", "description": "Stable Soyuz-generated identity for this authorized publication attempt." },
+    "runId": { "$ref": "#/$defs/uuid7", "description": "Canonical Soyuz RFC 9562 UUIDv7 run ID; never a display ID or executor-local ID." },
+    "repository": { "$ref": "#/$defs/repository" },
+    "mode": { "type": "string", "enum": ["branch", "pr"] },
+    "baseRef": { "$ref": "#/$defs/baseRef" },
+    "baseSha": { "$ref": "#/$defs/gitSha" },
+    "headRef": {
+      "type": "string",
+      "pattern": "^kirisame/p/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Must equal kirisame/p/{publicationId}; caller may not select an arbitrary branch name."
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "body": { "type": "string", "maxLength": 10000 },
+    "artifact": { "$ref": "https://kirisame.cyanautomation.dev/contracts/v1/publication-artifact.schema.json" },
+    "artifactDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "mode": { "const": "pr" } }, "required": ["mode"] },
+      "then": { "properties": { "title": true, "body": true }, "required": ["title", "body"] },
+      "else": { "properties": { "title": true, "body": true }, "not": { "anyOf": [{ "required": ["title"] }, { "required": ["body"] }] } }
+    }
+  ],
+  "$defs": {
+    "uuid7": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "name"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1, "maxLength": 39, "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,97}[a-z0-9])?$" }
+      }
+    },
+    "baseRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?(?:/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?)*$",
+      "not": { "anyOf": [
+        { "pattern": "\\.\\." },
+        { "pattern": "\\.lock(?:/|$)" },
+        { "pattern": "@\\{" }
+      ] }
+    },
+    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+  }
+}

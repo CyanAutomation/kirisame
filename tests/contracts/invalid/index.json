@@ -1,0 +1,144 @@
+{
+  "fixtures": [
+    {
+      "file": "unsupported-contract-version.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "const"
+      }
+    },
+    {
+      "file": "missing-publication-id.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "required"
+      }
+    },
+    {
+      "file": "invalid-canonical-run-id.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "pattern"
+      }
+    },
+    {
+      "file": "invalid-repository-identifier.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "pattern"
+      }
+    },
+    {
+      "file": "unsupported-publication-mode.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "enum"
+      }
+    },
+    {
+      "file": "invalid-base-commit-sha.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "pattern"
+      }
+    },
+    {
+      "file": "unsafe-branch-reference.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "pattern"
+      }
+    },
+    {
+      "file": "path-traversal.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "not"
+      }
+    },
+    {
+      "file": "duplicate-file-paths.json",
+      "expected": {
+        "source": "semantic",
+        "code": "DUPLICATE_OR_CONFLICTING_PATH"
+      }
+    },
+    {
+      "file": "invalid-content-digest.json",
+      "expected": {
+        "source": "semantic",
+        "code": "CONTENT_DIGEST_MISMATCH"
+      }
+    },
+    {
+      "file": "unsupported-file-type.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "const"
+      }
+    },
+    {
+      "file": "oversized-manifest.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "maxItems"
+      }
+    },
+    {
+      "file": "oversized-file-descriptor.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "maximum"
+      }
+    },
+    {
+      "file": "malformed-publication-result.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "required"
+      }
+    },
+    {
+      "file": "unrecognised-error-classification.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "enum"
+      }
+    },
+    {
+      "file": "unknown-security-field.json",
+      "expected": {
+        "source": "schema",
+        "keyword": "additionalProperties"
+      }
+    },
+    {
+      "file": "cross-run-artifact-substitution.json",
+      "expected": {
+        "source": "semantic",
+        "code": "ARTIFACT_PROVENANCE_MISMATCH"
+      }
+    },
+    {
+      "file": "artifact-digest-mismatch.json",
+      "expected": {
+        "source": "semantic",
+        "code": "ARTIFACT_DIGEST_MISMATCH"
+      }
+    },
+    {
+      "file": "git-metadata-path.json",
+      "expected": {
+        "source": "semantic",
+        "code": "UNSAFE_PATH"
+      }
+    },
+    {
+      "file": "non-deterministic-file-order.json",
+      "expected": {
+        "source": "semantic",
+        "code": "FILES_NOT_SORTED"
+      }
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "documentType": "publication-error",
+  "value": {
+    "code": "GITHUB_TIMEOUT",
+    "classification": "maybe-retry",
+    "message": "A bounded safe error message."
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kirisame.cyanautomation.dev/contracts/v1/publication-artifact.schema.json",
+  "title": "Kirisame publication artifact v1",
+  "description": "Immutable UTF-8 file-change manifest. Its request-level digest is SHA-256 over RFC 8785 canonical JSON bytes of this object.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "artifactId", "runId", "repository", "baseRef", "baseSha", "fileCount", "totalBytes", "files"],
+  "properties": {
+    "contractVersion": { "const": "1" },
+    "artifactId": { "$ref": "#/$defs/uuid7" },
+    "runId": { "$ref": "#/$defs/uuid7" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "baseRef": { "$ref": "#/$defs/baseRef" },
+    "baseSha": { "$ref": "#/$defs/gitSha" },
+    "fileCount": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "totalBytes": { "type": "integer", "minimum": 0, "maximum": 5242880 },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/fileChange" }
+    }
+  },
+  "$defs": {
+    "uuid7": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Canonical lower-case RFC 9562 UUIDv7."
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "name"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1, "maxLength": 39, "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,97}[a-z0-9])?$" }
+      }
+    },
+    "baseRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?(?:/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,61}[A-Za-z0-9])?)*$",
+      "not": { "anyOf": [
+        { "pattern": "\\.\\." },
+        { "pattern": "\\.lock(?:/|$)" },
+        { "pattern": "@\\{" }
+      ] },
+      "description": "Bounded Git branch name. Implementations also reject every invalid Git ref form before any GitHub call."
+    },
+    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$", "description": "Lower-case GitHub SHA-1 object ID. GitHub Git Data API v1 uses SHA-1 object IDs." },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^[^/\\\\:]+(?:/[^/\\\\:]+)*$",
+      "not": { "anyOf": [
+        { "pattern": "(^|/)\\.\\.?(/|$)" },
+        { "pattern": "(^|/)\\.git(/|$)" }
+      ] },
+      "description": "POSIX relative path. NFC normalization, path ancestry, case-fold collisions and remaining Git path constraints are checked semantically."
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mediaType", "encoding", "byteLength", "sha256", "data"],
+      "properties": {
+        "mediaType": { "const": "text/plain; charset=utf-8" },
+        "encoding": { "const": "base64" },
+        "byteLength": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "data": {
+          "type": "string",
+          "maxLength": 1398104,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+          "contentEncoding": "base64"
+        }
+      }
+    },
+    "fileChange": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "path", "content"],
+          "properties": {
+            "operation": { "const": "add" },
+            "path": { "$ref": "#/$defs/path" },
+            "content": { "$ref": "#/$defs/content" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "path", "baseBlobSha", "content"],
+          "properties": {
+            "operation": { "const": "modify" },
+            "path": { "$ref": "#/$defs/path" },
+            "baseBlobSha": { "$ref": "#/$defs/gitSha" },
+            "content": { "$ref": "#/$defs/content" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "path", "baseBlobSha"],
+          "properties": {
+            "operation": { "const": "delete" },
+            "path": { "$ref": "#/$defs/path" },
+            "baseBlobSha": { "$ref": "#/$defs/gitSha" }
+          }
+        }
+      ]
+    }
+  }
+}

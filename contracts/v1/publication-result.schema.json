@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kirisame.cyanautomation.dev/contracts/v1/publication-result.schema.json",
+  "title": "Kirisame publication result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "publicationId", "runId", "repository", "mode", "outcome", "retryable", "reconciliation"],
+  "properties": {
+    "contractVersion": { "const": "1" },
+    "publicationId": { "$ref": "#/$defs/uuid7" },
+    "runId": { "$ref": "#/$defs/uuid7" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "mode": { "type": "string", "enum": ["branch", "pr"] },
+    "outcome": { "type": "string", "enum": ["branch_published", "pr_published", "retryable_failure", "blocked"] },
+    "retryable": { "type": "boolean" },
+    "reconciliation": { "type": "string", "enum": ["not_needed", "confirmed_absent", "branch_confirmed", "pull_request_confirmed", "conflict", "unknown"] },
+    "branch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "commitSha"],
+      "properties": {
+        "ref": { "type": "string", "pattern": "^kirisame/p/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+        "commitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "reused": { "type": "boolean" }
+      }
+    },
+    "pullRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "url", "state"],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "url": { "type": "string", "format": "uri", "pattern": "^https://github\\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/pull/[1-9][0-9]*$" },
+        "state": { "type": "string", "enum": ["open", "closed", "merged"] }
+      }
+    },
+    "error": { "$ref": "https://kirisame.cyanautomation.dev/contracts/v1/publication-error.schema.json" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "const": "branch_published" } }, "required": ["outcome"] },
+      "then": { "properties": { "mode": { "const": "branch" }, "retryable": { "const": false }, "branch": true, "pullRequest": true, "error": true }, "required": ["branch"], "not": { "anyOf": [{ "properties": { "pullRequest": true }, "required": ["pullRequest"] }, { "properties": { "error": true }, "required": ["error"] }] } }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "pr_published" } }, "required": ["outcome"] },
+      "then": { "properties": { "mode": { "const": "pr" }, "retryable": { "const": false }, "branch": true, "pullRequest": { "type": "object", "properties": { "state": { "const": "open" } } }, "error": true }, "required": ["branch", "pullRequest"], "not": { "properties": { "error": true }, "required": ["error"] } }
+    },
+    {
+      "if": { "properties": { "outcome": { "enum": ["retryable_failure", "blocked"] } }, "required": ["outcome"] },
+      "then": { "properties": { "error": true }, "required": ["error"] }
+    }
+  ],
+  "$defs": {
+    "uuid7": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "name"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1, "maxLength": 39, "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,97}[a-z0-9])?$" }
+      }
+    }
+  }
+}

@@ -1,0 +1,523 @@
+{
+  "documentType": "publication-artifact",
+  "value": {
+    "contractVersion": "1",
+    "artifactId": "019a6000-0000-7000-8000-000000000003",
+    "runId": "019a6000-0000-7000-8000-000000000002",
+    "repository": {
+      "owner": "cyanautomation",
+      "name": "demo-app"
+    },
+    "baseRef": "main",
+    "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "fileCount": 101,
+    "totalBytes": 0,
+    "files": [
+      {
+        "operation": "delete",
+        "path": "old/file-000.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-001.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-002.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-003.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-004.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-005.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-006.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-007.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-008.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-009.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-010.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-011.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-012.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-013.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-014.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-015.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-016.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-017.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-018.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-019.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-020.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-021.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-022.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-023.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-024.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-025.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-026.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-027.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-028.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-029.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-030.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-031.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-032.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-033.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-034.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-035.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-036.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-037.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-038.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-039.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-040.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-041.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-042.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-043.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-044.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-045.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-046.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-047.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-048.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-049.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-050.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-051.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-052.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-053.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-054.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-055.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-056.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-057.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-058.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-059.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-060.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-061.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-062.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-063.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-064.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-065.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-066.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-067.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-068.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-069.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-070.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-071.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-072.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-073.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-074.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-075.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-076.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-077.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-078.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-079.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-080.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-081.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-082.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-083.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-084.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-085.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-086.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-087.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-088.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-089.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-090.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-091.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-092.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-093.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-094.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-095.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-096.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-097.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-098.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-099.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+        "operation": "delete",
+        "path": "old/file-100.txt",
+        "baseBlobSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ]
+  }
+}

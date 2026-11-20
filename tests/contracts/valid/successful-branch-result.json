@@ -1,0 +1,21 @@
+{
+  "documentType": "publication-result",
+  "value": {
+    "contractVersion": "1",
+    "publicationId": "019a6000-0000-7000-8000-000000000001",
+    "runId": "019a6000-0000-7000-8000-000000000002",
+    "repository": {
+      "owner": "cyanautomation",
+      "name": "demo-app"
+    },
+    "mode": "branch",
+    "outcome": "branch_published",
+    "retryable": false,
+    "reconciliation": "branch_confirmed",
+    "branch": {
+      "ref": "kirisame/p/019a6000-0000-7000-8000-000000000001",
+      "commitSha": "dddddddddddddddddddddddddddddddddddddddd",
+      "reused": false
+    }
+  }
+}
