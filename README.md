@@ -131,6 +131,10 @@ A publication request is expected to contain, or securely reference:
 
 The canonical contract is JSON Schema Draft 2020-12 under [contracts/v1](contracts/v1/). It defines publication requests and results, artifact manifests, structured errors and lifecycle events. Run the offline schema and fixture suite with `npm ci && npm run test:contracts`. Contract validation is implemented; publishing is still planned.
 
+### Default publication policy
+
+The default `publishMode` throughout Soyuz, Kirisame and its executor integrations is `pr`. Other modes are rare, explicit exceptions for narrowly scoped tests; they must not become routine configuration defaults or hide missing GitHub credentials. Kirisame's request schema documents `pr` as the client default while still requiring an explicit `mode` at its trusted boundary. See the [cross-project publish mode policy](docs/PUBLISH-MODE-POLICY.md).
+
 ### Artifact handling
 
 Publication artifacts must be immutable, bounded and verifiable. Contract v1 uses a structured file-change manifest for UTF-8 additions, modifications and deletions. It defines size, path, ordering and digest rules and rejects unsupported file types or Git operations.
@@ -409,6 +413,7 @@ Commits created by Kirisame may trigger GitHub Actions workflows configured in t
 - [Security policy and GitHub App permissions](docs/SECURITY.md)
 - [Publication lifecycle and reconciliation](docs/LIFECYCLE.md)
 - [Soyuz integration contract and migration](docs/SOYUZ-INTEGRATION.md)
+- [Cross-project publish mode policy](docs/PUBLISH-MODE-POLICY.md)
 - [Phase 1 implementation plan](docs/PHASE1-PLAN.md)
 - [Architecture Decision Records](docs/adr/)
 - [Contract schemas](contracts/v1/) and [fixture tests](tests/contracts/)

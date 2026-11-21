@@ -197,6 +197,9 @@ test('all v1 schemas use JSON Schema Draft 2020-12 and have unique identifiers',
   assert.equal(schemas.length, 5);
   assert.ok(schemas.every((schema) => schema.$schema === 'https://json-schema.org/draft/2020-12/schema'));
   assert.equal(new Set(schemas.map((schema) => schema.$id)).size, schemas.length);
+  const requestSchema = schemas.find((schema) => schema.$id === schemaFor.get('publication-request'));
+  assert.equal(requestSchema.properties.mode.default, 'pr');
+  assert.ok(requestSchema.required.includes('mode'), 'Kirisame still requires an explicit publication operation');
 });
 
 test('valid contract fixtures are accepted', async (t) => {

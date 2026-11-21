@@ -40,7 +40,7 @@ Soyuz work is required before a Kirisame mock can be replaced by a real GitHub a
 - Add a publication record keyed by unique publicationId, with an immutable fingerprint, canonical runId, requested mode, exact repository/baseRef/baseSha, artifact ID/digest, transition state, attempt lease/fence, next-attempt timestamp and terminal result.
 - Add D1 compare-and-set dispatch serialization and append-only publication events. Keep execution statuses and callbacks unchanged until a separately reviewed migration.
 - Define how trusted validation evidence is recorded and checked before publication. Do not authorize from a worker-supplied boolean alone.
-- Resolve publishMode auto and none in Soyuz and call Kirisame only with branch or pr.
+- Default normal runs to `pr` in Soyuz entry points and call Kirisame only with explicit `pr` or a rare test-only `branch`; resolve test-only `none` in Soyuz without calling Kirisame.
 - Resolve the actual publication base branch and exact base commit. The existing run ref is not enough to assume both values or pin the checkout commit.
 - Have executors produce the v1 file-change manifest and bind it to the canonical run and current claim fence. Current Soyuz artifact uploads are generic diagnostic files.
 - Extend artifact retention so a manifest survives run-history culling while publication remains pending, publishing, retryable or blocked.

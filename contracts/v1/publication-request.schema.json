@@ -10,7 +10,7 @@
     "publicationId": { "$ref": "#/$defs/uuid7", "description": "Stable Soyuz-generated identity for this authorized publication attempt." },
     "runId": { "$ref": "#/$defs/uuid7", "description": "Canonical Soyuz RFC 9562 UUIDv7 run ID; never a display ID or executor-local ID." },
     "repository": { "$ref": "#/$defs/repository" },
-    "mode": { "type": "string", "enum": ["branch", "pr"] },
+    "mode": { "type": "string", "enum": ["branch", "pr"], "default": "pr", "description": "Trusted callers should use pr unless a narrowly scoped, explicitly authorized test requires branch. Kirisame still requires this field explicitly." },
     "baseRef": { "$ref": "#/$defs/baseRef" },
     "baseSha": { "$ref": "#/$defs/gitSha" },
     "headRef": {

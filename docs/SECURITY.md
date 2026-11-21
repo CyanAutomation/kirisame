@@ -49,6 +49,7 @@ Soyuz must load canonical run state and trusted validation evidence, resolve the
 ## Branch and repository operation policy
 
 - Accept only explicit branch or pr operations. Soyuz resolves auto and none before the call.
+- Treat pr as the default across publication entry points. Branch-only publication is a rare explicit test exception; none is resolved in Soyuz and never sent to Kirisame.
 - Use only the deterministic head ref kirisame/p/{publicationId}. Reject any other head ref.
 - Never write or merge the base/default branch. Never create, edit, delete or change repository settings.
 - Require the remote base ref to resolve to the request's exact baseSha before constructing a commit. Do not silently rebase on a changed target.

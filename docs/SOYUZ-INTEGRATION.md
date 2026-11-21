@@ -2,6 +2,10 @@
 
 ## Proposed private interface
 
+### Default publication policy
+
+Omitting `publishMode` means `pr` across Soyuz REST, agent/UTCP calls, Kaseki API/CLI/worker requests, and Rusty-Fossil's normalized queue parser. Kirisame's `mode` field remains required so the trusted boundary never guesses the operation; `pr` is its documented client default. Other values are explicit exceptions for narrowly scoped tests. Do not use `auto` or `none` to mask unavailable GitHub credentials. Soyuz resolves `none` without calling Kirisame.
+
 Soyuz is the only initially authorized publication client. The production interface is a Cloudflare Service Binding from Soyuz to Kirisame, with no public publishing route.
 
 The proposed endpoint is POST /internal/v1/publications. The body is the strict [publication request v1](../contracts/v1/publication-request.schema.json), including an inline immutable manifest and its artifactDigest. The response is the strict [publication result v1](../contracts/v1/publication-result.schema.json). The version is the literal string 1 in the JSON body; it is independent of either repository's package version. Unknown versions, unknown properties and unsupported operations fail closed.
@@ -17,7 +21,7 @@ Before each publication, Soyuz must:
 1. Load the canonical run by UUIDv7, not its display ID.
 2. Confirm the run is completed under the trusted execution protocol and retrieve claim-fenced validation evidence. A completion callback's optional publishedUrl is legacy output, not authorization proof.
 3. Resolve the destination repository, publication target branch and exact base commit from canonical run data and validated executor evidence.
-4. Resolve publishMode. none results in no Kirisame call. auto becomes a specific authorized branch, pr, or no-publication decision in Soyuz. Only branch and pr are sent.
+4. Resolve publishMode. An omitted mode becomes pr. `none` results in no Kirisame call and is reserved for an explicitly scoped test; `auto` is likewise a rare explicit test exception. For ordinary publication, send `pr`. `branch` is permitted only for a test that specifically exercises branch-only behavior.
 5. Create and persist a unique publicationId and immutable request fingerprint, associate the retained artifact with runId, and reserve one attempt using a D1 compare-and-set.
 6. Send only the request authorized by that record.
 
@@ -27,7 +31,7 @@ Kirisame trusts the call as coming from Soyuz because of the binding deployment,
 
 The current canonical run ID is a Soyuz-generated UUIDv7. Its displayId, such as soyuz-N, is human-facing and must never appear in runId or artifact provenance. Kaseki's historical local kaseki-N ID is also not canonical.
 
-Current Soyuz's regular POST /v1/runs route defaults publishMode to pr. Its agent-facing POST /v1/agent/runs route defaults to none. Current Kaseki controller/API defaults to pr and accepts auto, none, branch and pr. Kaseki's auto mode currently skips publication if GitHub App credentials are unavailable. In the new design, only Soyuz resolves auto and none; Kirisame receives no implicit or automatic choice. See the [Soyuz request contract](https://github.com/CyanAutomation/soyuz/blob/main/docs/CONTRACT.md), [agent run implementation](https://github.com/CyanAutomation/soyuz/blob/main/src/api/agent-runs.ts), [Kaseki API types](https://github.com/CyanAutomation/kaseki-agent/blob/main/src/kaseki-api-types.ts), and [Kaseki publish settings](https://github.com/CyanAutomation/kaseki-agent/blob/main/docs/ENV_VARS.md).
+Soyuz's regular POST /v1/runs route already defaults publishMode to pr; the accompanying change aligns POST /v1/agent/runs and UTCP, which previously defaulted to none. Kaseki controller/API/worker defaults are pr; the accompanying change aligns its CLI and built-in configuration fallback, which previously used auto. Kaseki's explicit auto mode can skip publication when credentials are unavailable, so it is not a safe normal default. Rusty-Fossil already defaults a missing normalized queue value to pr. In the new design, Soyuz resolves any explicitly requested test exception before Kirisame receives an operation; Kirisame requires an explicit branch or pr mode. See the [Soyuz request contract](https://github.com/CyanAutomation/soyuz/blob/main/docs/CONTRACT.md), [agent run implementation](https://github.com/CyanAutomation/soyuz/blob/main/src/api/agent-runs.ts), [Kaseki API types](https://github.com/CyanAutomation/kaseki-agent/blob/main/src/kaseki-api-types.ts), and [Kaseki publish settings](https://github.com/CyanAutomation/kaseki-agent/blob/main/docs/ENV_VARS.md).
 
 Current Soyuz stores generic artifacts uploaded with the worker ID and claim callback fence. It does not yet store the v1 file-change manifest, publicationId, exact base commit or artifact digest described here. Current Kaseki sends summary, failure JSON, diff, changed-file list, scorecard and evaluation artifacts; it does not currently send this immutable manifest to Soyuz. Rusty-Fossil has no coding executor yet. Both executor integrations must converge on the same executor-neutral manifest and Soyuz provenance protocol.
 
