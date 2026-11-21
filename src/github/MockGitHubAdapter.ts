@@ -222,9 +222,10 @@ export class MockGitHubAdapter implements GitHubAdapter {
     if (state.pullRequests.some((item) => item.headRef === input.headRef && item.baseRef === input.baseRef)) {
       throw new PublicationFailure("PULL_REQUEST_CONFLICT");
     }
+    const number = this.#nextPullRequestNumber++;
     const record: PullRequestRecord = {
-      number: this.#nextPullRequestNumber++,
-      url: `https://github.com/${repository.owner}/${repository.name}/pull/${this.#nextPullRequestNumber - 1}`,
+      number,
+      url: `https://github.com/${repository.owner}/${repository.name}/pull/${number}`,
       state: "open",
       headRef: input.headRef,
       baseRef: input.baseRef,
