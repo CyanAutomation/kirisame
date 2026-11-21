@@ -1,53 +1,55 @@
-# Phase 1 plan
+# Phase 0.1 and Phase 1 status
 
-Phase 1 establishes a mock-driven Cloudflare Worker foundation. It does not integrate real GitHub credentials, create GitHub branches or pull requests, provision a production binding, or add storage resources.
+Phase 0.1 contract hardening and the Phase 1 Cloudflare Worker foundation are implemented. The diagnostics-only Worker was deployed on 2026-11-21 and verified at `https://kirisame.scheimann.workers.dev/`; GitHub publishing remains disabled. Soyuz is not connected, and no GitHub credentials or production Service Binding are configured.
 
-## Bounded implementation
+## Implemented
 
-1. **Project structure:** strict TypeScript Worker source with modules for request routing, contract validation, policy, GitHub adapter interface and safe errors. Keep JSON Schema v1 canonical and test the checked-in schemas and fixtures as data.
-2. **Worker runtime:** Wrangler configuration for local development and Cloudflare Workers Vitest. Do not configure a production Service Binding, GitHub secret, R2 bucket, D1 database, Queue, KV, Durable Object or Workflow.
-3. **Private service contract:** implement POST /internal/v1/publications for Service Binding calls only in the local/test environment. Test it with a stub binding; do not add a public route or production target.
-4. **Runtime validation:** enforce content type, a 9 MiB request body cap before JSON parsing, v1-only validation, strict unknown-field rejection, artifact provenance and digest checks, path checks, request fingerprint and safe failure classification.
-5. **Mock GitHub adapter:** define narrow operations for reading installation/repository/base state, reading tree paths, creating blobs/tree/commit/ref, listing PRs and creating a PR. The mock records operations and injects conflicts, timeouts and rate-limit responses. No real adapter or token generation is included.
-6. **Diagnostics:** minimal health endpoint returns service and contract version. Health must not disclose secrets, installation inventory, allowlists, raw errors or artifact data.
-7. **Compatibility tests:** run positive and negative contract fixtures through the Worker handler, assert version and unknown-field rejection, and simulate repeated requests and ambiguous mutation outcomes against the mock.
-8. **Quality gates:** locked dependency install, contract tests, Worker runtime tests, type check, lint if selected, and Wrangler dry-run in CI. No test should require network access, GitHub or Cloudflare credentials, a deployed service, Docker or a live repository.
+- Strict TypeScript and ESM project using NPM, the Cloudflare `cf` CLI, `cloudflare.config.ts`, Vite and Cloudflare Workers Vitest integration.
+- Reusable TypeScript validators generated from the canonical JSON Schemas. Node contract tests and the Worker runtime use the same validation rules.
+- Semantic checks for artifact provenance, canonical digest and base64, decoded byte limits, paths, workflow restrictions, stable error taxonomy, result/request identity and lifecycle event combinations.
+- Typed private `PublisherEntrypoint.publish(requestJson)` RPC. It accepts a JSON string, enforces the 9 MiB UTF-8 request cap before parsing, validates v1, and returns a typed result or structured error. The test-only mock publisher is in the test Worker entrypoint and is not part of the production export.
+- Public `GET /`, `GET /health` and `GET /readyz` diagnostics. The public Worker never dispatches to the publisher; `/internal/v1/publications` returns 404.
+- Allowlisted publication policy, narrow GitHub adapter interface and deterministic in-memory mock with reconciliation and fault injection.
+- Deterministic branch and pull-request publication tests. The implementation uses create-only refs, validates the full expected tree and reconciles ambiguous mutations; it does not promise exactly-once writes.
+- CI for pull requests and `main`, with pinned GitHub Actions, least-privilege permissions and no Cloudflare or GitHub secrets.
 
-## Suggested source layout
+## Runtime and deployment configuration
 
-~~~text
-src/
-  index.ts
-  routes/publications.ts
-  contracts/validate.ts
-  publication/policy.ts
-  publication/reconcile.ts
-  github/GitHubAdapter.ts
-  github/MockGitHubAdapter.ts
-  errors/publication-error.ts
-tests/
-  worker/
-  contracts/
-contracts/v1/
-~~~
+The Worker is named `kirisame`, targets account `c40f3cb30efbf8c6d081cf9e50a61931`, and uses `https://kirisame.scheimann.workers.dev/`. Before deployment, Cloudflare confirmed the account's `scheimann` workers.dev subdomain and no existing Worker named `kirisame`; deployment then created the Worker with previews disabled. Configuration is in [cloudflare.config.ts](../cloudflare.config.ts).
 
-The file-change and result contracts remain language-neutral. TypeScript may generate or validate types at build time, but Rust clients consume the JSON Schemas and fixture files without depending on a shared runtime package.
+The public Worker reports publishing as unavailable. The named RPC entrypoint returns the contract error `PUBLISHING_UNAVAILABLE` for valid requests. No mock adapter is instantiated in the production entrypoint. There is no GitHub adapter, App key, installation ID, D1, R2, KV, Queue, Workflow, Durable Object or production Service Binding configured.
 
-## Cross-repository prerequisites before publishing can be enabled
+See [Operations](OPERATIONS.md) for local commands, diagnostics, deployment checks and rollback. A future Soyuz binding is documented as `KIRISAME`; the public URL is not the integration endpoint.
 
-Soyuz work is required before a Kirisame mock can be replaced by a real GitHub adapter:
+## Developer commands
 
-- Add a publication record keyed by unique publicationId, with an immutable fingerprint, canonical runId, requested mode, exact repository/baseRef/baseSha, artifact ID/digest, transition state, attempt lease/fence, next-attempt timestamp and terminal result.
-- Add D1 compare-and-set dispatch serialization and append-only publication events. Keep execution statuses and callbacks unchanged until a separately reviewed migration.
-- Define how trusted validation evidence is recorded and checked before publication. Do not authorize from a worker-supplied boolean alone.
-- Default normal runs to `pr` in Soyuz entry points and call Kirisame only with explicit `pr` or a rare test-only `branch`; resolve test-only `none` in Soyuz without calling Kirisame.
-- Resolve the actual publication base branch and exact base commit. The existing run ref is not enough to assume both values or pin the checkout commit.
-- Have executors produce the v1 file-change manifest and bind it to the canonical run and current claim fence. Current Soyuz artifact uploads are generic diagnostic files.
-- Extend artifact retention so a manifest survives run-history culling while publication remains pending, publishing, retryable or blocked.
-- Add a private Soyuz-to-Kirisame Service Binding, request timeout, retry scheduler, rollout order and independent version compatibility tests.
-- Migrate Kaseki publication out of the execution worker only after a canary proves artifacts, authorization, PR reconciliation and recovery. Remove GitHub write credentials from coding hosts after cutover.
-- Implement the same artifact production contract for Rusty-Fossil when its executor exists; its current repository has no coding or publishing capability.
+Use Node.js 22.23.0 or newer within the Node 22 line; the current `cf` release candidate requires it.
 
-## Later phase boundary
+```sh
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm run dev
+```
 
-GitHub App JWT signing, installation token minting, allowlist configuration, real GitHub API calls, repository policy rollout, production Service Bindings, storage bindings and operational deployment belong after the Phase 1 mock foundation. GitHub publication should remain disabled until the Soyuz prerequisites above are implemented and cross-repository rollout is approved.
+`npm test` runs contract and Worker runtime suites. `npm run build` and `npm run typecheck` use the Cloudflare `cf` build. The checks need no external GitHub or Cloudflare credentials. `cf dev` and `cf build` use the Cloudflare Vite plugin and `cloudflare.config.ts`; no Wrangler configuration is maintained.
+
+## Reconciliation policy
+
+For every valid request, the application validates the contract, provenance, artifact and repository policy before reading publication state. It reads the deterministic publication ref before the current target base ref. A matching branch and matching open PR are confirmed success even after the target branch advances. If no branch exists, the current base must still equal the requested `baseSha` before any Git object is written. If a valid branch has no PR, PR creation requires a fresh base equality check. The publisher never silently rebases, force-updates a ref or overwrites a conflicting branch. See [Lifecycle](LIFECYCLE.md) and [ADR 0007](adr/0007-idempotency-reconciliation.md).
+
+## Prerequisites before real publishing
+
+Real GitHub publication and Soyuz integration remain later work:
+
+- Add a Soyuz publication record with unique `publicationId`, immutable request fingerprint, attempt lease/fence, retry time, outcome history and artifact retention pin.
+- Record and verify trusted completion and validation evidence before dispatch; do not authorize from an executor-supplied boolean.
+- Produce the v1 immutable file-change manifest in executors and bind it to the canonical run and current claim fence.
+- Configure a least-privilege Kirisame GitHub App installation and secret rotation process.
+- Implement and test a real GitHub adapter, bounded outbound timeouts, and reconciliation against live API semantics.
+- Add the `KIRISAME` Service Binding to Soyuz only after the receiver contract is deployed and reviewed; then enable caller dispatch separately.
+- Migrate Kaseki publication in a staged cutover. Rusty-Fossil will use the same contract when its executor exists.
+
+Do not enable GitHub writes until these controls and a cross-repository rollout are reviewed. Do not change Soyuz, Kaseki-Agent or Rusty-Fossil in this repository's implementation PR.

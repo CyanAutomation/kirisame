@@ -2,11 +2,11 @@
 
 **Secure, centralised GitHub publishing for CyanAutomation.**
 
-Kirisame is a standalone, Cloudflare-native publication service responsible for securely committing validated code changes, creating repository branches, and opening GitHub pull requests on behalf of trusted automation systems.
+Kirisame is a standalone, Cloudflare-native service designed to commit validated code changes, create repository branches, and open GitHub pull requests on behalf of trusted automation systems.
 
 It provides a dedicated boundary between systems that **generate code** and systems authorised to **publish code**.
 
-> **Project status:** Phase 0 — architecture and contract foundation completed. This repository contains versioned JSON Schemas and offline fixture validation; no Worker, GitHub authentication, or publishing runtime is implemented.
+> **Project status:** Phase 0.1 contract hardening and the Phase 1 Worker foundation are implemented. The diagnostics-only Worker is deployed at [kirisame.scheimann.workers.dev](https://kirisame.scheimann.workers.dev/). Its production publisher returns `PUBLISHING_UNAVAILABLE`; real GitHub authentication and writes, the Soyuz binding, and executor migration are not implemented.
 
 ## Overview
 
@@ -62,9 +62,11 @@ Kirisame performs the GitHub-facing operations required to publish approved chan
 
 Kirisame must not become a general-purpose remote Git command execution service.
 
-## GitHub authentication
+## Intended GitHub authentication
 
-Kirisame uses a dedicated GitHub App.
+This authentication flow is not configured in the current Worker foundation. There is no GitHub App private key or live GitHub adapter in the deployed Worker.
+
+When production publishing is implemented, Kirisame will use the dedicated GitHub App.
 
 | Property | Value |
 |---|---|
@@ -77,7 +79,7 @@ Kirisame uses a dedicated GitHub App.
 
 ### Authentication flow
 
-Kirisame authenticates using the GitHub App private key and configured App ID.
+The intended flow uses the GitHub App private key and configured App ID.
 
 For each authorised publication, the service:
 
@@ -129,7 +131,7 @@ A publication request is expected to contain, or securely reference:
 | `artifact` | Reference or payload containing validated changes |
 | `artifactDigest` | Integrity reference for the publication contents |
 
-The canonical contract is JSON Schema Draft 2020-12 under [contracts/v1](contracts/v1/). It defines publication requests and results, artifact manifests, structured errors and lifecycle events. Run the offline schema and fixture suite with `npm ci && npm run test:contracts`. Contract validation is implemented; publishing is still planned.
+The canonical contract is JSON Schema Draft 2020-12 under [contracts/v1](contracts/v1/). It defines publication requests and results, artifact manifests, structured errors and lifecycle events. Runtime validation reuses the same schema-derived TypeScript validators as the contract tests. Run all checks with `npm ci`, `npm run typecheck`, `npm run lint`, `npm test` and `npm run build`.
 
 ### Default publication policy
 
@@ -221,22 +223,22 @@ Kirisame is designed as a lightweight, Cloudflare-native TypeScript service.
 
 | Component | Purpose |
 |---|---|
-| Cloudflare Workers | Execute GitHub publication operations |
-| Service Bindings | Private communication with Soyuz |
-| Worker Secrets | Store GitHub App private key and sensitive configuration |
+| Cloudflare Workers | Run the current diagnostics-only Worker; future GitHub publication operations |
+| Service Bindings | Intended private communication with Soyuz; not configured yet |
+| Worker Secrets | Intended GitHub App key storage; no secrets are configured |
 | Workers Observability | Structured operational logs and diagnostics |
 
 Cloudflare D1, Queues or Workflows may be introduced when justified by publication requirements. They are not mandatory prerequisites for the initial implementation.
 
 ### Service interface
 
-The primary production interface should be a private Cloudflare Service Binding exposed to Soyuz.
+The intended private interface is a typed Cloudflare Service Binding named `KIRISAME`, with a separate `PublisherEntrypoint.publish(requestJson)` RPC. It accepts a JSON serialization of the v1 request and enforces a 9 MiB UTF-8 cap before parsing. No production binding is configured yet. The public Worker exposes only `/`, `/health` and `/readyz`; requests to `/internal/v1/publications` return 404 and cannot invoke publication logic.
 
-Kirisame must not expose an unauthenticated public publishing endpoint.
+The named production publisher returns a structured `PUBLISHING_UNAVAILABLE` error for valid requests. The test-only binding injects a mock adapter and is not part of the production Worker entrypoint. Kirisame must not expose an unauthenticated public publishing endpoint.
 
 Any future external API must have an explicit authentication, authorisation and rate-limiting model.
 
-Local development should support mocked GitHub interactions without requiring production credentials.
+Local development and CI exercise mocked GitHub interactions without requiring production credentials. See [Operations](docs/OPERATIONS.md) for development, deployment preflight, public diagnostics and rollback instructions.
 
 ### Configuration
 
@@ -247,7 +249,7 @@ Anticipated configuration includes:
 - Repository authorisation policy — The repositories and publication operations Kirisame may perform.
 - Cloudflare Service Binding configuration — Private service integration with Soyuz.
 
-These configuration names are provisional until the implementation contract is finalised.
+These GitHub settings are not present in the current deployment. The intended future Service Binding is named `KIRISAME` and is documented in [Soyuz integration](docs/SOYUZ-INTEGRATION.md).
 
 Production credentials must never appear in source control, test fixtures, application logs or publication artifacts.
 
@@ -334,14 +336,20 @@ New consumers should integrate through an authorised control-plane interface rat
 - **Completed:** Add deterministic valid/invalid fixtures and executable offline validation.
 - **Completed:** Document the Phase 1 plan and cross-repository prerequisites.
 
+### Phase 0.1 — Contract hardening
+
+- **Implemented:** Extract reusable TypeScript schema and semantic validation.
+- **Implemented:** Validate nested error taxonomy, result/request consistency, event transitions, Unicode/path safety, canonical artifact bytes and workflow restrictions.
+- **Implemented:** Correct reconciliation ordering and add explicit `PUBLISHING_UNAVAILABLE` contract error.
+
 ### Phase 1 — Cloudflare Worker foundation
 
-- Establish a strict TypeScript project.
-- Introduce the Cloudflare Worker runtime and deployment configuration.
-- Implement a private publication interface.
-- Add structured errors, logging and health diagnostics.
-- Provide a mock GitHub adapter for local development and tests.
-- Establish CI, linting, type checking and test coverage.
+- **Implemented:** Strict TypeScript Worker using `cf`, `cloudflare.config.ts`, Vite and Workers Vitest integration.
+- **Implemented:** Public diagnostics plus an isolated private typed RPC entrypoint.
+- **Implemented:** Sanitized structured errors and safe operation logs.
+- **Implemented:** GitHub adapter interface, allowlist policy and deterministic mock publisher.
+- **Implemented:** CI, linting, type checking, contract tests and Worker runtime tests.
+- **Not enabled:** Real GitHub publishing, production Service Binding and GitHub credentials.
 
 ### Phase 2 — GitHub App integration
 
@@ -415,6 +423,7 @@ Commits created by Kirisame may trigger GitHub Actions workflows configured in t
 - [Soyuz integration contract and migration](docs/SOYUZ-INTEGRATION.md)
 - [Cross-project publish mode policy](docs/PUBLISH-MODE-POLICY.md)
 - [Phase 1 implementation plan](docs/PHASE1-PLAN.md)
+- [Operations and deployment](docs/OPERATIONS.md)
 - [Architecture Decision Records](docs/adr/)
 - [Contract schemas](contracts/v1/) and [fixture tests](tests/contracts/)
 
@@ -427,4 +436,4 @@ Relevant platform documentation:
 
 ---
 
-**Kirisame is the trusted GitHub publication boundary for CyanAutomation: executors produce validated changes, Soyuz authorises their publication, and Kirisame performs the GitHub writes.**
+**Kirisame is being built as the trusted GitHub publication boundary for CyanAutomation. The current Worker foundation validates requests and exercises publication through a mock; it does not make live GitHub writes.**

@@ -10,7 +10,7 @@ Current Soyuz stores generic executor artifacts in private R2 for 30 days. It do
 
 Define a structured immutable file-change manifest for UTF-8 additions, modifications and deletions. For the first implementation, Soyuz loads the verified manifest from R2 and sends it inline to Kirisame over the private Service Binding. Bound one decoded manifest to 5 MiB content, 100 files, 1 MiB per file, 8 MiB canonical manifest JSON and 9 MiB request body.
 
-Soyuz must retain the artifact while publication is nonterminal and after terminal resolution for the documented recovery window. Phase 0 provisions no R2 resources.
+Soyuz must retain the artifact while publication is nonterminal and after terminal resolution for the documented recovery window. The Phase 0.1/Phase 1 foundation provisions no R2 resources.
 
 ## Alternatives considered
 

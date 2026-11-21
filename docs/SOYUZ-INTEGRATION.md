@@ -1,20 +1,20 @@
 # Soyuz integration contract
 
-## Proposed private interface
+## Private typed RPC interface
 
 ### Default publication policy
 
 Omitting `publishMode` means `pr` across Soyuz REST, agent/UTCP calls, Kaseki API/CLI/worker requests, and Rusty-Fossil's normalized queue parser. Kirisame's `mode` field remains required so the trusted boundary never guesses the operation; `pr` is its documented client default. Other values are explicit exceptions for narrowly scoped tests. Do not use `auto` or `none` to mask unavailable GitHub credentials. Soyuz resolves `none` without calling Kirisame.
 
-Soyuz is the only initially authorized publication client. The production interface is a Cloudflare Service Binding from Soyuz to Kirisame, with no public publishing route.
+Soyuz is the only intended publication client. Kirisame exports a separate named `PublisherEntrypoint` with the typed RPC method `publish(requestJson: string)`. The deployment has no configured Service Binding yet, and no caller is connected. The public HTTP handler cannot reach this named entrypoint.
 
-The proposed endpoint is POST /internal/v1/publications. The body is the strict [publication request v1](../contracts/v1/publication-request.schema.json), including an inline immutable manifest and its artifactDigest. The response is the strict [publication result v1](../contracts/v1/publication-result.schema.json). The version is the literal string 1 in the JSON body; it is independent of either repository's package version. Unknown versions, unknown properties and unsupported operations fail closed.
+The private RPC accepts a JSON serialization of the strict [publication request v1](../contracts/v1/publication-request.schema.json), including its inline immutable manifest and `artifactDigest`. It measures the UTF-8 payload against a 9 MiB cap before parsing. The response is either the strict [publication result v1](../contracts/v1/publication-result.schema.json) or the strict [publication error v1](../contracts/v1/publication-error.schema.json). The version is the literal string `1` in the JSON body; it is independent of either repository's package version. Unknown versions, unknown properties and unsupported operations fail closed. The RPC method has no HTTP media type or status code; do not wrap it in the public `fetch()` handler.
 
-Kirisame does not implement the binding in Phase 0. A compatibility-safe rollout is receiver first, caller second: deploy a Kirisame version that accepts v1, configure the private binding in Soyuz, then enable Soyuz publication dispatch. The caller retries the same body on the same versioned path. A contract change that cannot be safely additive requires a new v2 path and schema; the receiver must be deployed before the caller.
+The test-only `MockPublisherEntrypoint` injects the mock adapter and is excluded from the production Worker entrypoint. In production, a valid request returns `PUBLISHING_UNAVAILABLE`; publishing is not enabled. When integration prerequisites are met, use the binding name `KIRISAME` consistently, configure it only on Soyuz, and deploy in receiver-first order: deploy a compatible Kirisame receiver, attach the binding in Soyuz, then enable Soyuz dispatch. Soyuz must retry the same immutable request and publicationId. A contract change that cannot be safely additive requires a new v2 schema and RPC method; deploy the receiver before the caller.
 
 ## Caller identity and authorization
 
-The Service Binding is the initial caller identity. Deployment config must attach it only to Soyuz and keep Kirisame's handler off every public route. Do not accept caller identity from headers or body fields. Do not use Kaseki's worker bearer token or Soyuz's public client token as a substitute for binding isolation.
+The Service Binding will provide the initial caller boundary. Deployment config must attach it only to Soyuz and keep the publisher off every public route. Do not accept caller identity from headers or body fields. Do not use Kaseki's worker bearer token or Soyuz's public client token as a substitute for binding isolation.
 
 Before each publication, Soyuz must:
 
@@ -63,4 +63,4 @@ Soyuz owns publication records, CAS dispatch leases, retry timing and append-onl
 
 Soyuz and Kirisame are independently deployed. Each side validates its own contract and pins support to version 1. New required fields or changed field meanings require a new version. Unknown versions and unrecognized security-sensitive fields are rejected. For rollout and rollback, first deploy the receiver with backward-compatible acceptance, then enable the caller; disable caller dispatch before rolling back a receiver that no longer supports the contract.
 
-Do not change Soyuz run callbacks, terminal states, Queue contracts, or executor credentials in Phase 0. Before end-to-end publishing, update Soyuz's publication model and artifact retention, then integrate Kaseki and the future Rusty-Fossil executor as described in [Phase 1](PHASE1-PLAN.md).
+Do not change Soyuz run callbacks, terminal states, Queue contracts, or executor credentials in the Kirisame implementation. Before end-to-end publishing, update Soyuz's publication model and artifact retention, then integrate Kaseki and the future Rusty-Fossil executor as described in [Phase 0.1 and Phase 1 status](PHASE1-PLAN.md).

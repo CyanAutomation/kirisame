@@ -36,16 +36,19 @@ Kirisame computes and validates the same artifact digest but has no durable oper
 
 ## Reconciliation rules
 
-Before retrying any uncertain GitHub mutation, Kirisame reads remote state:
+For every request, validate its contract, artifact provenance, canonical digest, file contents and repository policy before GitHub mutations. Reconciliation then follows the publication ref first:
 
-1. Validate the v1 request, caller binding, repository allowlist, artifact provenance, canonical digest and every file.
-2. Resolve the GitHub App installation and obtain a token limited to the requested repository and required permissions.
-3. Read the base ref. If it does not resolve to baseSha, return BASE_MOVED. Do not rebase or silently produce a different commit.
-4. Read the deterministic head ref. If absent, read the base tree and check add/modify/delete expectations, then create the content-addressed blobs, tree and one-parent commit whose parent is baseSha.
-5. Create the deterministic ref only if absent. If the create response is ambiguous, read the ref again. Reuse it only when the commit and publication marker match this request. A mismatch is BRANCH_CONFLICT; never force-update or delete it.
-6. For mode branch, return branch_published after confirming the ref and commit.
-7. For mode pr, list pull requests for the exact head and base, including closed PRs. If one open PR with the same publication marker exists, return it. If a closed/merged PR or unrelated/conflicting PR exists, return PULL_REQUEST_CONFLICT. If the list confirms absence, create the PR. If that response is ambiguous, list again and return the matching open PR if present.
-8. If GitHub cannot be read during reconciliation, return retryable_failure with reconciliation unknown and a safe retry delay. Do not repeat the uncertain write until a later retry has reconciled again.
+1. Read the deterministic head ref `kirisame/p/{publicationId}` before resolving the current target base ref.
+2. If the head ref exists, read its commit and tree. Reuse it only when its parent is the requested `baseSha`, its commit marker identifies the same publicationId/runId/artifactDigest, and its full tree matches the expected artifact. Otherwise return `BRANCH_CONFLICT` without modifying the ref.
+3. For `branch` mode, return `branch_published` after confirming that matching commit.
+4. For `pr` mode, list PRs for the exact repository, head and base, including closed PRs. Return a matching open PR as confirmed success even if the target branch has since advanced. A closed, merged, duplicate or mismatched PR is `PULL_REQUEST_CONFLICT`.
+5. If a matching branch exists but no PR exists, read the target base ref. Create the PR only if it still equals the requested `baseSha`; otherwise return `BASE_MOVED`, preserving the branch as partial progress.
+6. If the publication branch does not exist, resolve the target base ref and require it to equal `baseSha` before writing any Git object. Do not rebase or silently produce a different commit.
+7. Read the pinned base tree and check every add/modify/delete precondition. Create content-addressed blobs, the tree and a one-parent commit whose parent is `baseSha`. Create the deterministic ref only if absent, then read it back and verify its commit and full tree.
+8. In `pr` mode, list PRs for the exact head/base before creating one. If the create response is ambiguous, list again and return the matching open PR if present.
+9. If a GitHub read needed for reconciliation fails, return `retryable_failure` with reconciliation unknown and a safe retry delay. A later retry must read remote state before repeating an uncertain write.
+
+The ordering matters: once the deterministic branch and matching open PR prove that this publication completed, later movement of the target branch does not invalidate that result. Base equality is required before new branch writes and before completing an existing branch whose PR is still missing. The implementation does not silently rebase, force-update refs or claim exactly-once writes.
 
 The GitHub REST Git Data API can create blobs, trees, commits and refs. Ref creation is deliberately create-only; updates are not used in v1. Pull requests are separately created and reconciled using head, base and a Kirisame publication marker. See [Git trees](https://docs.github.com/en/rest/git/trees), [Git commits](https://docs.github.com/en/rest/git/commits), [Git references](https://docs.github.com/en/rest/git/refs), and [Pull Requests](https://docs.github.com/en/rest/pulls/pulls).
 
@@ -53,14 +56,14 @@ The GitHub REST Git Data API can create blobs, trees, commits and refs. Ref crea
 
 | Situation | Required behavior |
 | --- | --- |
-| First request | Validate before mutation, pin baseSha, create content objects, create the deterministic ref, and optionally create/reconcile a PR. |
+| First request | Validate before mutation, check the deterministic ref, pin baseSha before new writes, create content objects and ref, then create/reconcile a PR. |
 | Identical replay | Re-read GitHub state and return the matching branch/PR. Do not create another ref or PR. |
 | Same publicationId with different content or metadata | Soyuz rejects by stored fingerprint. If Kirisame observes a ref/PR marker mismatch, return a permanent conflict. |
-| Branch created, PR not created | Confirm the branch commit and marker; then create the PR only after a confirmed absence check. |
+| Branch created, PR not created | Confirm the branch commit and marker; if the target base still equals baseSha, create the PR after a confirmed absence check. Otherwise retain the branch and return BASE_MOVED. |
 | PR created, response lost | Re-list by exact head/base and publication marker; return the existing PR. |
 | Temporary token-service or connectivity failure | Classify as retryable only for timeout, network failure or service 5xx. Reconcile after any ambiguous mutation. A confirmed bad permission is blocked. |
 | GitHub rate limiting | Return retryable with Retry-After when present. Soyuz waits; Kirisame does not busy-loop or exceed bounded attempts. |
-| Base branch moves | Return BASE_MOVED and preserve any already-created branch. Do not create the PR against a different base SHA or rebase. A new attempt requires a newly authorized base/artifact and publicationId. |
+| Base branch moves | An already-complete matching branch/PR remains confirmed success. Before new branch writes or PR completion, return BASE_MOVED if the target no longer equals baseSha. Preserve any existing branch; do not rebase. A changed base/artifact requires new authorization and publicationId. |
 | Pre-existing conflicting feature branch | Reuse only if marker, parent/base SHA and commit content all match. Otherwise return BRANCH_CONFLICT without modifying it. |
 | Concurrent calls for one publicationId | Soyuz compare-and-set allows one active dispatcher. If a duplicate still reaches Kirisame, the deterministic ref create conflicts safely and it reconciles; GitHub PR uniqueness plus the marker prevents duplicate PRs. |
 
@@ -80,7 +83,7 @@ The API returns a bounded error code, classification, safe message, optional ret
 
 ## Timeout and backoff proposal
 
-Proposed initial integration defaults, to be confirmed during Phase 1/2 mock and load work: Soyuz gives one Service Binding attempt up to 120 seconds; each outbound GitHub request has a 15-second timeout. A transport timeout is an uncertain outcome, not a failed mutation. Soyuz retries the identical request after bounded exponential backoff with jitter, starting at 2 seconds and capped at 5 minutes. It honors GitHub Retry-After up to a one-hour delay and persists the next attempt time. After three immediate transient failures, it yields to the durable Soyuz scheduler rather than looping in one Worker invocation. These values are policy proposals, not implemented runtime behavior.
+Proposed integration defaults, to validate before live GitHub publishing: Soyuz gives one Service Binding attempt up to 120 seconds; each outbound GitHub request has a 15-second timeout. A transport timeout is an uncertain outcome, not a failed mutation. Soyuz retries the identical request after bounded exponential backoff with jitter, starting at 2 seconds and capped at 5 minutes. It honors GitHub Retry-After up to a one-hour delay and persists the next attempt time. After three immediate transient failures, it yields to the durable Soyuz scheduler rather than looping in one Worker invocation. These values are policy proposals, not implemented runtime behavior.
 
 ## Persistence decision
 
