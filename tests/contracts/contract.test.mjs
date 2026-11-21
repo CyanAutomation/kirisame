@@ -68,7 +68,7 @@ function fail(code, message) {
 function artifactErrors(artifact) {
   const errors = [];
   if (artifact.fileCount !== artifact.files.length) errors.push(fail('FILE_COUNT_MISMATCH', 'fileCount must equal files.length'));
-  const actualBytes = artifact.files.reduce((sum, file) => sum + (file.content?.byteLength ?? 0), 0);
+  const actualBytes = artifact.files.reduce((sum, file) => sum + (file.content ? Buffer.from(file.content.data, 'base64').byteLength : 0), 0);
   if (artifact.totalBytes !== actualBytes) errors.push(fail('TOTAL_BYTES_MISMATCH', 'totalBytes must equal the decoded content byte total'));
   if (actualBytes > maxArtifactBytes) errors.push(fail('ARTIFACT_TOO_LARGE', 'decoded artifact bytes exceed 5 MiB'));
 
@@ -211,6 +211,14 @@ test('valid contract fixtures are accepted', async (t) => {
       assert.deepEqual(result, { valid: true, errors: [] });
     });
   }
+});
+
+test('artifact totalBytes is measured from decoded content', async () => {
+  const fixture = JSON.parse(await readFile(path.join(validDir, 'artifact-add-modify-delete.json'), 'utf8'));
+  fixture.value.files[0].content.data = Buffer.from('shorter content').toString('base64');
+
+  const result = validate(fixture.documentType, fixture.value);
+  assert.ok(result.errors.some((error) => error.code === 'TOTAL_BYTES_MISMATCH'), JSON.stringify(result.errors));
 });
 
 test('invalid fixtures fail for their expected schema or semantic reason', async (t) => {
