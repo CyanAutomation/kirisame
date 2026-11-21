@@ -1,15 +1,40 @@
 {
-  "name": "@cyanautomation/kirisame-contracts",
+  "name": "@cyanautomation/kirisame",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Versioned publication contract schemas and fixtures for Kirisame.",
+  "description": "Contract-validated Cloudflare Worker foundation for Kirisame publication.",
   "scripts": {
-    "test:contracts": "node --test tests/contracts/contract.test.mjs"
+    "generate:contracts": "node scripts/generate-contract-validators.mjs",
+    "pretest:contracts": "npm run generate:contracts",
+    "test:contracts": "node --import tsx --test tests/contracts/contract.test.mjs",
+    "pretest:worker": "npm run generate:contracts",
+    "test:worker": "vitest run",
+    "test": "npm run test:contracts && npm run test:worker",
+    "prebuild": "npm run generate:contracts",
+    "build": "node scripts/run-cf.mjs build",
+    "pretypecheck": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "predev": "npm run generate:contracts",
+    "dev": "node scripts/run-cf.mjs dev",
+    "deploy": "node scripts/run-cf.mjs deploy"
+  },
+  "dependencies": {
+    "canonicalize": "2.1.0"
   },
   "devDependencies": {
-    "ajv": "8.17.1",
+    "@cloudflare/vite-plugin": "^2.0.0-rc.3",
+    "@cloudflare/vitest-plugin": "^1.9.0",
+    "@typescript-eslint/eslint-plugin": "^8.73.0",
+    "@typescript-eslint/parser": "^8.73.0",
+    "ajv": "^8.20.0",
     "ajv-formats": "3.0.1",
-    "canonicalize": "2.1.0"
+    "cf": "1.0.0-rc.1",
+    "eslint": "^10.15.0",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
   }
 }

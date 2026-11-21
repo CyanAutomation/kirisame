@@ -1,10 +1,10 @@
 # Kirisame architecture
 
-**Status:** Phase 0 architecture baseline. The ownership and service shape follow the Kirisame charter. Cross-repository integration details that require Soyuz changes remain proposals.
+**Status:** Phase 0.1 contracts and Phase 1 mock-driven Worker foundation implemented. Real GitHub publishing and cross-repository integration remain disabled prerequisites.
 
 ## Intended system
 
-Kirisame is an independently deployed Cloudflare Worker and GitHub publication service. Its initial caller is Soyuz over a private Cloudflare Service Binding. Kirisame is not an MCP or UTCP service and has no agent-facing discovery API.
+Kirisame is an independently deployed Cloudflare Worker designed to serve as the GitHub publication boundary. Its intended initial caller is Soyuz over a private Cloudflare Service Binding. Kirisame is not an MCP or UTCP service and has no agent-facing discovery API.
 
 ~~~mermaid
 flowchart LR
@@ -58,7 +58,7 @@ The following describes the current related repositories as inspected on 2026-11
 - **Kaseki-Agent** currently owns GitHub publication inside its execution workflow. Its API and host defaults are pr, and the companion Kaseki change aligns its CLI configuration fallback from auto to pr. The controller still accepts auto, none, branch and pr; explicit non-pr values are test exceptions, and normal pr mode requires credentials rather than silently skipping publication. The host reads the GitHub App ID, client ID and private-key files; the client ID is used for credential validation, while the TypeScript helper creates an App JWT, resolves the installation, requests an installation token and retries selected transient requests. In `kaseki-agent.sh`, the publishing step checks out `kaseki/$INSTANCE_NAME`, stages the paths in `changed-files.txt`, commits with a `Kaseki: $INSTANCE_NAME` message, and pushes with Git CLI using `--force-with-lease`. Branch mode stops after the push. PR mode posts a non-draft PR and retries creation with bounded 2/4/8-second backoff by default. Kaseki exposes publish mode, PR URL, push evidence and diagnostics in its local result; the Soyuz adapter derives publishedUrl from result metadata and sends it with the terminal completion callback. See [publication settings](https://github.com/CyanAutomation/kaseki-agent/blob/main/docs/ENV_VARS.md), [GitHub utilities](https://github.com/CyanAutomation/kaseki-agent/blob/main/src/github-utils.ts), [token helper](https://github.com/CyanAutomation/kaseki-agent/blob/main/src/github-app-token.ts), [shell publisher](https://github.com/CyanAutomation/kaseki-agent/blob/main/kaseki-agent.sh), [Kaseki API routes](https://github.com/CyanAutomation/kaseki-agent/blob/main/src/kaseki-api-routes.ts), [Soyuz artifact adapter](https://github.com/CyanAutomation/kaseki-agent/blob/main/src/integrations/soyuz/soyuz-artifacts.ts), and [Soyuz host guide](https://github.com/CyanAutomation/kaseki-agent/blob/main/docs/SOYUZ_INTEGRATION.md).
 - **Rusty-Fossil** is a Rust host-controller foundation for Soyuz Queue and callback contracts. Its production intake is disabled, it has no Docker or coding executor, and it has no repository checkout or GitHub publishing capability. It treats Queue input as untrusted and requires Soyuz claim and start proofs. See its [README](https://github.com/CyanAutomation/rusty-fossil/blob/main/README.md), [architecture](https://github.com/CyanAutomation/rusty-fossil/blob/main/docs/ARCHITECTURE.md), and [compatibility inventory](https://github.com/CyanAutomation/rusty-fossil/blob/main/docs/COMPATIBILITY.md).
 
-Today, Kaseki's validation and GitHub publishing occur before Soyuz receives its completed callback. That callback may contain publishedUrl, but Soyuz has no separate publication record or publication state machine. Phase 0 does not change any of those systems or callback schemas.
+Today, Kaseki's validation and GitHub publishing occur before Soyuz receives its completed callback. That callback may contain publishedUrl, but Soyuz has no separate publication record or publication state machine. This Kirisame foundation does not change those systems or callback schemas.
 
 The migration boundary is deliberate: future Kaseki and Rusty-Fossil execution paths upload the same executor-neutral manifest to Soyuz and hold no GitHub write credentials. Soyuz authorizes and dispatches the publication. Kirisame replaces Kaseki's repository shell, local Git commit/push, force-with-lease branch update and in-process PR retry loop with bounded Git Data API operations, deterministic create-only `kirisame/p/{publicationId}` refs, and read-before-retry reconciliation. Kirisame never force-updates or deletes a pre-existing branch; an unrelated ref is a conflict requiring a new authorization and publicationId.
 
@@ -66,11 +66,11 @@ The migration boundary is deliberate: future Kaseki and Rusty-Fossil execution p
 
 1. **Untrusted execution:** Generated code, repository files, executor output, and claims emitted from a disposable coding environment are untrusted. A success message or validationPassed flag alone grants no write authority.
 2. **Validated but untrusted artifact:** The manifest remains untrusted input after a successful coding run. Soyuz binds it to its canonical run and current worker claim, validates trusted execution evidence, stores it immutably, and authorizes a specific publication. Kirisame still verifies the bytes, digest, paths, operation set and declared base.
-3. **Trusted Soyuz control plane:** Soyuz reads its own canonical run and validation evidence, resolves publishMode, chooses the publicationId, locks the artifact to that run, and invokes only an allowed operation. Its Service Binding is the caller identity for the initial deployment.
+3. **Trusted Soyuz control plane:** Soyuz will read its own canonical run and validation evidence, resolve publishMode, choose the publicationId, lock the artifact to that run, and invoke only an allowed operation. Its Service Binding will be the caller identity for the initial integration.
 4. **Kirisame publication service:** Kirisame accepts requests only through the configured private binding. It validates the complete v1 request, checks its independent repository allowlist and GitHub installation access, and applies its own ref, branch, artifact and token policies.
 5. **GitHub:** GitHub is the authority for installed repositories, refs, commit objects, open or closed pull requests, and branch protections. A successful request from Soyuz does not override repository policy or GitHub rules.
 
-The private Service Binding must be configured only on the Soyuz Worker. Kirisame has no public publishing route. Caller-supplied validation booleans, executor-supplied repository authorization, arbitrary artifact URLs, and arbitrary Git or GitHub operations are never accepted.
+The production Worker exposes a separate named typed-RPC `PublisherEntrypoint`; the default public handler cannot dispatch to it. The deployment has no Service Binding configured yet, and the named publisher returns `PUBLISHING_UNAVAILABLE`. When the binding is introduced, attach it only to the Soyuz Worker. Kirisame has no public publishing route. Caller-supplied validation booleans, executor-supplied repository authorization, arbitrary artifact URLs, and arbitrary Git or GitHub operations are never accepted.
 
 ## Publication sequence
 
@@ -103,7 +103,7 @@ sequenceDiagram
 
 ## Platform boundary
 
-The target is one independent Worker with a private Service Binding. The initial runtime needs no public route, D1, KV, Queue, Durable Object, Workflow or new R2 resource. Soyuz remains the durable lifecycle owner. A Kirisame journal is not a Phase 0 or Phase 1 resource.
+The target is one independent Worker with a private Service Binding. The current runtime exposes public diagnostics only and has no Service Binding, D1, KV, Queue, Durable Object, Workflow or new R2 resource. Soyuz remains the intended durable lifecycle owner. A Kirisame journal is not a Phase 0.1 or Phase 1 resource.
 
 The artifact request is intentionally small and bounded: at most 5 MiB decoded file content, 100 paths, 1 MiB per file, and 8 MiB for canonical manifest JSON. This is a contract policy, not a Cloudflare limit. Cloudflare documents a 128 MiB isolate memory limit and recommends bounding or streaming bodies; request body caps at public Worker ingress depend on the zone plan. See [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) and [Service Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/).
 

@@ -1,6 +1,6 @@
 # Security policy
 
-Kirisame is the GitHub write boundary. Phase 0 adds contract and policy requirements only; it does not configure the GitHub App, create credentials, contact GitHub write endpoints, or add a publishing runtime.
+Kirisame is intended to be the GitHub write boundary. Phase 0.1 hardens the v1 contract, and Phase 1 adds a mock-driven publication runtime and diagnostics-only Worker. Production GitHub publishing is disabled: no GitHub App credentials, installation configuration, real GitHub adapter, or Soyuz Service Binding are present. The named production publisher returns the structured `PUBLISHING_UNAVAILABLE` error for valid requests.
 
 ## GitHub App identity and permissions
 
@@ -20,7 +20,7 @@ The App private key belongs only in Kirisame's trusted Worker secret configurati
 
 ### GitHub App configuration review checklist
 
-This is a future review checklist. No setting is changed in Phase 0.
+This remains a future review checklist. No GitHub App setting or credential is configured by the Phase 0.1/Phase 1 foundation.
 
 - Confirm the App identity is Kirisame, owner CyanAutomation, App ID 3345400.
 - Set only Metadata read, Contents read/write, and Pull requests read/write.
@@ -42,9 +42,9 @@ Installation does not imply Kirisame policy authorization. Kirisame does not inf
 
 ## Request authentication and provenance
 
-The initial production interface is a private Service Binding called only by Soyuz. Do not expose a public publishing route, accept bearer credentials from executors, or trust identity headers supplied by an HTTP caller. Deployment configuration is part of the trust boundary: only Soyuz receives the binding, and Kirisame has no public route to the publication handler.
+The intended production interface is a private Cloudflare Service Binding called only by Soyuz. The Worker exports a separate named typed-RPC publisher entrypoint, but no production binding is currently configured. Do not expose a public publishing route, accept bearer credentials from executors, or trust identity headers supplied by an HTTP caller. When configured, deployment must attach the binding only to Soyuz; the public default `fetch()` handler must never dispatch to publication logic.
 
-Soyuz must load canonical run state and trusted validation evidence, resolve the requested mode, and authorize one stable publicationId before calling Kirisame. Kirisame verifies that the artifact's runId, repository, baseRef and baseSha equal the request, verifies artifactDigest and all file hashes, and applies its independent allowlist. A caller-supplied validationPassed boolean is never sufficient evidence. Current Soyuz callbacks are claim-fenced but do not contain an immutable file-change manifest or a publication authorization record; those are integration prerequisites, not Phase 0 capabilities.
+Soyuz must load canonical run state and trusted validation evidence, resolve the requested mode, and authorize one stable publicationId before calling Kirisame. Kirisame verifies that the artifact's runId, repository, baseRef and baseSha equal the request, verifies artifactDigest and all file hashes, and applies its independent allowlist. A caller-supplied validationPassed boolean is never sufficient evidence. Current Soyuz callbacks are claim-fenced but do not contain an immutable file-change manifest or a publication authorization record; those remain integration prerequisites.
 
 ## Branch and repository operation policy
 
@@ -52,7 +52,7 @@ Soyuz must load canonical run state and trusted validation evidence, resolve the
 - Treat pr as the default across publication entry points. Branch-only publication is a rare explicit test exception; none is resolved in Soyuz and never sent to Kirisame.
 - Use only the deterministic head ref kirisame/p/{publicationId}. Reject any other head ref.
 - Never write or merge the base/default branch. Never create, edit, delete or change repository settings.
-- Require the remote base ref to resolve to the request's exact baseSha before constructing a commit. Do not silently rebase on a changed target.
+- Read the deterministic publication ref before the current target base ref. Return an already-confirmed matching branch/PR after target movement; require the remote base to equal baseSha before new writes or before creating a missing PR. Do not silently rebase on a changed target.
 - Create a branch ref only when it is absent. If it exists, reuse it only after proving it represents the same publicationId, runId, baseSha and artifactDigest. Otherwise return BRANCH_CONFLICT.
 - Never force-update, delete or overwrite a pre-existing branch. Use GitHub ref updates only with force disabled if a future operation explicitly requires an update; v1 does not update an existing ref.
 - Let repository rules and branch protections reject the operation. Do not bypass protections or request bypass permissions. A protected publication branch may produce a policy rejection.

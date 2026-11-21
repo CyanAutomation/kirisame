@@ -22,4 +22,4 @@ Soyuz owns canonical run identity and authorization. A single initial caller kee
 
 ## Consequences and trade-offs
 
-Soyuz must persist publication authorization and issue one stable publicationId. Additional callers require a separately reviewed identity and authorization model. The current Service Binding design depends on deployment configuration being restricted; a public route would require a new authentication design.
+Soyuz must persist publication authorization and issue one stable publicationId. Additional callers require a separately reviewed identity and authorization model. When introduced, the Service Binding must be configured only on Soyuz; a public route would require a new authentication design. The Phase 1 Worker exports a separate named publisher entrypoint, but its production configuration has no binding and no connected caller.

@@ -4,6 +4,8 @@
 
 The system default is `publishMode: "pr"` for every ordinary run, from admission through execution and publication. A missing value must resolve to `pr`. Do not configure a normal deployment to use `auto`, `none`, or `branch`, and do not use those modes to hide missing GitHub credentials or avoid the normal review path.
 
+This default gives automated submissions a real publication effect: after authorization and validation, a normal run can create a branch and open a pull request. Callers must account for that effect when admitting work, selecting an allowlisted repository and retaining the artifact. An open PR is a review request, not approval or merge authorization. GitHub branch protection, CODEOWNERS and required checks remain the repository's review controls. Kirisame does not merge PRs. Missing Kirisame `mode` is rejected at runtime; the schema's `default: "pr"` documents caller policy and is never applied by validation.
+
 | Component | Default behavior | Exception boundary |
 | --- | --- | --- |
 | Soyuz REST, agent and UTCP entry points | Resolve an omitted mode to `pr` before persisting and queueing the run. | Preserve an explicit non-`pr` mode only for an authorized, narrowly scoped test. |

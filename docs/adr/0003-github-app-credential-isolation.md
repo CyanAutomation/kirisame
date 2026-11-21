@@ -24,6 +24,6 @@ This follows the Kirisame charter and separates app identity from execution. Git
 
 ## Consequences and trade-offs
 
-Kirisame handles key rotation, token issuance and safe redaction. App installation and the Kirisame allowlist remain separate gates. No credential generation, rotation, installation or configuration change is part of Phase 0.
+Kirisame will handle key rotation, token issuance and safe redaction. App installation and the Kirisame allowlist remain separate gates. No credential generation, rotation, installation or configuration change is part of the Phase 0.1/Phase 1 foundation.
 
 References: [GitHub App permission guidance](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app) and [installation token guidance](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).

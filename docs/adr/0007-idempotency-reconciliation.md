@@ -1,6 +1,6 @@
 # ADR 0007: Idempotency and GitHub reconciliation
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -8,9 +8,9 @@ GitHub may complete a branch or PR mutation while the response is lost. Repeatin
 
 ## Decision
 
-Use a stable Soyuz-generated publicationId and immutable request fingerprint. Derive the branch as kirisame/p/{publicationId}. Soyuz serializes attempts with a D1 compare-and-set. Kirisame uses create-only refs and reconciles branch and PR state before repeating mutations. A mismatched existing branch is a permanent conflict; never force update or delete it.
+Use a stable Soyuz-generated publicationId and immutable request fingerprint. Derive the branch as kirisame/p/{publicationId}. Soyuz should serialize attempts with a D1 compare-and-set. Kirisame validates the immutable request and policy, then reads the deterministic branch before reading the current target base ref. A matching branch is reused only after verifying its commit marker, base parent and complete expected tree. A mismatched existing branch is a permanent conflict; never force update or delete it.
 
-For PR mode, reconcile open and closed PRs by exact head, base and a Kirisame marker in the PR body. Return an existing matching open PR; a closed or unrelated PR blocks this publicationId.
+For PR mode, reconcile open and closed PRs by exact head, base and a Kirisame marker in the PR body. Return an existing matching open PR as success even when the base ref has advanced. If the branch exists but no PR exists, require the target base to still match the requested baseSha before creating the PR. If the branch does not exist, require base equality before writing Git objects or creating the branch. A closed or unrelated PR blocks this publicationId.
 
 ## Alternatives considered
 
