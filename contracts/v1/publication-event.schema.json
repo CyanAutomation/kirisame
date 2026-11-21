@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kirisame.cyanautomation.dev/contracts/v1/publication-event.schema.json",
+  "title": "Kirisame publication lifecycle event v1",
+  "description": "Sanitized append-only lifecycle projection. Soyuz persists canonical publication state and events.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "eventId", "publicationId", "runId", "occurredAt", "source", "type", "state"],
+  "properties": {
+    "contractVersion": { "const": "1" },
+    "eventId": { "$ref": "#/$defs/uuid" },
+    "publicationId": { "$ref": "#/$defs/uuid7" },
+    "runId": { "$ref": "#/$defs/uuid7" },
+    "occurredAt": { "type": "string", "format": "date-time", "maxLength": 40 },
+    "source": { "type": "string", "enum": ["soyuz", "kirisame"] },
+    "type": { "type": "string", "enum": ["publication.requested", "publication.started", "publication.branch_published", "publication.pull_request_created", "publication.retryable_failure", "publication.blocked", "publication.reconciled"] },
+    "state": { "type": "string", "enum": ["pending", "publishing", "published", "retryable_failure", "blocked"] },
+    "repository": { "$ref": "#/$defs/repository" },
+    "branchRef": { "type": "string", "pattern": "^kirisame/p/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "commitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "pullRequestNumber": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+    "errorCode": { "$ref": "https://kirisame.cyanautomation.dev/contracts/v1/publication-error.schema.json#/$defs/code" }
+  },
+  "$defs": {
+    "uuid7": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "name"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1, "maxLength": 39, "pattern": "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,97}[a-z0-9])?$" }
+      }
+    }
+  }
+}

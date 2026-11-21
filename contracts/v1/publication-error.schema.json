@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kirisame.cyanautomation.dev/contracts/v1/publication-error.schema.json",
+  "title": "Kirisame structured publication error v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "classification", "message"],
+  "properties": {
+    "code": { "$ref": "#/$defs/code" },
+    "classification": { "type": "string", "enum": ["invalid", "policy", "conflict", "retryable", "internal"] },
+    "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "requestId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "retryAfterSeconds": { "type": "integer", "minimum": 0, "maximum": 86400 }
+  },
+  "$defs": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "INVALID_REQUEST", "UNSUPPORTED_VERSION", "UNAUTHORIZED_CALLER", "REPOSITORY_NOT_ALLOWED",
+        "APP_NOT_INSTALLED", "GITHUB_PERMISSION_DENIED", "ARTIFACT_INVALID", "ARTIFACT_DIGEST_MISMATCH",
+        "ARTIFACT_PROVENANCE_MISMATCH", "BASE_MOVED", "BRANCH_CONFLICT", "PULL_REQUEST_CONFLICT",
+        "GITHUB_AUTH_UNAVAILABLE", "GITHUB_RATE_LIMITED", "GITHUB_UNAVAILABLE", "GITHUB_TIMEOUT",
+        "RECONCILIATION_REQUIRED", "INTERNAL_ERROR"
+      ]
+    }
+  }
+}

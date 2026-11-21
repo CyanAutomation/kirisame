@@ -1,0 +1,62 @@
+{
+  "documentType": "publication-request",
+  "value": {
+    "contractVersion": "1",
+    "publicationId": "019a6000-0000-7000-8000-000000000001",
+    "runId": "019a6000-0000-7000-8000-000000000002",
+    "repository": {
+      "owner": "cyanautomation",
+      "name": "demo-app"
+    },
+    "mode": "pr",
+    "baseRef": "main",
+    "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "headRef": "kirisame/p/019a6000-0000-7000-8000-000000000001",
+    "title": "Improve the example service",
+    "body": "Add a small documentation change and remove an obsolete file.",
+    "artifact": {
+      "contractVersion": "1",
+      "artifactId": "019a6000-0000-7000-8000-000000000003",
+      "runId": "019a6000-0000-7000-8000-000000000002",
+      "repository": {
+        "owner": "cyanautomation",
+        "name": "demo-app"
+      },
+      "baseRef": "main",
+      "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileCount": 3,
+      "totalBytes": 29,
+      "files": [
+        {
+          "operation": "add",
+          "path": "README.md",
+          "content": {
+            "mediaType": "text/plain; charset=utf-8",
+            "encoding": "base64",
+            "byteLength": 14,
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "data": "SGVsbG8sIHdvcmxkIQo="
+          }
+        },
+        {
+          "operation": "modify",
+          "path": "docs/guide.md",
+          "baseBlobSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": {
+            "mediaType": "text/plain; charset=utf-8",
+            "encoding": "base64",
+            "byteLength": 15,
+            "sha256": "4e1871f51f6278d1fde0a72ef70fd32b1b797d99d21202d58f7c04012b045f0d",
+            "data": "VXBkYXRlZCBndWlkZS4K"
+          }
+        },
+        {
+          "operation": "delete",
+          "path": "obsolete.txt",
+          "baseBlobSha": "cccccccccccccccccccccccccccccccccccccccc"
+        }
+      ]
+    },
+    "artifactDigest": "sha256:810f4a94fdb9838a52b8f33886c7ad59bf956fd5cd96dc647504140230983a34"
+  }
+}

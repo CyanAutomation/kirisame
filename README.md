@@ -6,7 +6,7 @@ Kirisame is a standalone, Cloudflare-native publication service responsible for 
 
 It provides a dedicated boundary between systems that **generate code** and systems authorised to **publish code**.
 
-> **Project status:** Initial architecture and planning. Implementation has not yet begun.
+> **Project status:** Phase 0 — architecture and contract foundation completed. This repository contains versioned JSON Schemas and offline fixture validation; no Worker, GitHub authentication, or publishing runtime is implemented.
 
 ## Overview
 
@@ -129,17 +129,17 @@ A publication request is expected to contain, or securely reference:
 | `artifact` | Reference or payload containing validated changes |
 | `artifactDigest` | Integrity reference for the publication contents |
 
-The exact schema will be defined during implementation.
+The canonical contract is JSON Schema Draft 2020-12 under [contracts/v1](contracts/v1/). It defines publication requests and results, artifact manifests, structured errors and lifecycle events. Run the offline schema and fixture suite with `npm ci && npm run test:contracts`. Contract validation is implemented; publishing is still planned.
+
+### Default publication policy
+
+The default `publishMode` throughout Soyuz, Kirisame and its executor integrations is `pr`. Other modes are rare, explicit exceptions for narrowly scoped tests; they must not become routine configuration defaults or hide missing GitHub credentials. Kirisame's request schema documents `pr` as the client default while still requiring an explicit `mode` at its trusted boundary. See the [cross-project publish mode policy](docs/PUBLISH-MODE-POLICY.md).
 
 ### Artifact handling
 
-Publication artifacts must be immutable, bounded and verifiable.
+Publication artifacts must be immutable, bounded and verifiable. Contract v1 uses a structured file-change manifest for UTF-8 additions, modifications and deletions. It defines size, path, ordering and digest rules and rejects unsupported file types or Git operations.
 
-The initial implementation should support text-based file additions, modifications and deletions, with explicit behaviour for unsupported file types or Git operations.
-
-The contract must eventually support more complex repository changes, including binary files and file mode changes, without compromising validation or repository integrity.
-
-Kirisame must not execute arbitrary shell commands, run scripts extracted from artifacts or evaluate instructions contained in generated source files.
+Kirisame must not execute arbitrary shell commands, run scripts extracted from artifacts or evaluate instructions contained in generated source files. Binary files, symlinks, submodules, Git LFS objects and file-mode changes are outside v1. See [artifact handling](docs/ARTIFACTS.md).
 
 ### Authorisation
 
@@ -327,11 +327,12 @@ New consumers should integrate through an authorised control-plane interface rat
 
 ### Phase 0 — Architecture and contracts
 
-- Define service ownership and trust boundaries.
-- Document the publication request and response schemas.
-- Establish repository, branch and artifact safety requirements.
-- Define idempotency, error handling and reconciliation expectations.
-- Create deterministic contract fixtures and initial test requirements.
+- **Completed:** Define service ownership and trust boundaries.
+- **Completed:** Add publication request, result, artifact, error and event schemas.
+- **Completed:** Establish repository, branch and artifact safety requirements.
+- **Completed:** Define idempotency, error handling and reconciliation expectations.
+- **Completed:** Add deterministic valid/invalid fixtures and executable offline validation.
+- **Completed:** Document the Phase 1 plan and cross-repository prerequisites.
 
 ### Phase 1 — Cloudflare Worker foundation
 
@@ -406,6 +407,16 @@ Commits created by Kirisame may trigger GitHub Actions workflows configured in t
 - [Rusty-Fossil](https://github.com/CyanAutomation/rusty-fossil) — Rust-based coding execution framework.
 
 ## Documentation
+
+- [Architecture and trust boundaries](docs/ARCHITECTURE.md)
+- [Publication artifacts and digest rules](docs/ARTIFACTS.md)
+- [Security policy and GitHub App permissions](docs/SECURITY.md)
+- [Publication lifecycle and reconciliation](docs/LIFECYCLE.md)
+- [Soyuz integration contract and migration](docs/SOYUZ-INTEGRATION.md)
+- [Cross-project publish mode policy](docs/PUBLISH-MODE-POLICY.md)
+- [Phase 1 implementation plan](docs/PHASE1-PLAN.md)
+- [Architecture Decision Records](docs/adr/)
+- [Contract schemas](contracts/v1/) and [fixture tests](tests/contracts/)
 
 Relevant platform documentation:
 

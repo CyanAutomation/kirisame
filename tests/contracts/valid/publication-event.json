@@ -1,0 +1,19 @@
+{
+  "documentType": "publication-event",
+  "value": {
+    "contractVersion": "1",
+    "eventId": "019a6000-0000-7000-8000-000000000004",
+    "publicationId": "019a6000-0000-7000-8000-000000000001",
+    "runId": "019a6000-0000-7000-8000-000000000002",
+    "occurredAt": "2026-11-20T10:00:00Z",
+    "source": "kirisame",
+    "type": "publication.branch_published",
+    "state": "publishing",
+    "repository": {
+      "owner": "cyanautomation",
+      "name": "demo-app"
+    },
+    "branchRef": "kirisame/p/019a6000-0000-7000-8000-000000000001",
+    "commitSha": "dddddddddddddddddddddddddddddddddddddddd"
+  }
+}
