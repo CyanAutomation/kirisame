@@ -1,6 +1,6 @@
 # Kirisame architecture
 
-**Status:** Phase 0.1 contracts and Phase 1 mock-driven Worker foundation implemented. Real GitHub publishing and cross-repository integration remain disabled prerequisites.
+**Status:** Phase 0.1 contracts, Phase 1.1 publishing hardening, and Phase 2A GitHub App authentication/adapter implemented. Live GitHub publishing is uncommissioned by default; Soyuz and executor integration remain pending.
 
 ## Intended system
 
@@ -70,7 +70,7 @@ The migration boundary is deliberate: future Kaseki and Rusty-Fossil execution p
 4. **Kirisame publication service:** Kirisame accepts requests only through the configured private binding. It validates the complete v1 request, checks its independent repository allowlist and GitHub installation access, and applies its own ref, branch, artifact and token policies.
 5. **GitHub:** GitHub is the authority for installed repositories, refs, commit objects, open or closed pull requests, and branch protections. A successful request from Soyuz does not override repository policy or GitHub rules.
 
-The production Worker exposes a separate named typed-RPC `PublisherEntrypoint`; the default public handler cannot dispatch to it. The deployment has no Service Binding configured yet, and the named publisher returns `PUBLISHING_UNAVAILABLE`. When the binding is introduced, attach it only to the Soyuz Worker. Kirisame has no public publishing route. Caller-supplied validation booleans, executor-supplied repository authorization, arbitrary artifact URLs, and arbitrary Git or GitHub operations are never accepted.
+The production Worker exposes a separate named typed-RPC `PublisherEntrypoint`; the default public handler cannot dispatch to it. The checked-in publishing flag is false, the allowlist is empty, and no Service Binding is configured, so the publisher returns `PUBLISHING_UNAVAILABLE`. When the binding is introduced, attach it only to the Soyuz Worker. Kirisame has no public publishing route. Caller-supplied validation booleans, executor-supplied repository authorization, arbitrary artifact URLs, and arbitrary Git or GitHub operations are never accepted.
 
 ## Publication sequence
 

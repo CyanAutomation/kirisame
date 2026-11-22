@@ -1,6 +1,6 @@
 # Security policy
 
-Kirisame is intended to be the GitHub write boundary. Phase 0.1 hardens the v1 contract, and Phase 1 adds a mock-driven publication runtime and diagnostics-only Worker. Production GitHub publishing is disabled: no GitHub App credentials, installation configuration, real GitHub adapter, or Soyuz Service Binding are present. The named production publisher returns the structured `PUBLISHING_UNAVAILABLE` error for valid requests.
+Kirisame is the GitHub write boundary. Phase 0.1 contracts, Phase 1.1 hardening, and Phase 2A GitHub App authentication and real REST adapter are implemented. Production publishing remains disabled by the checked-in `PUBLISHING_ENABLED=false` setting and empty repository allowlist. No App key, installation, approved repository, or Soyuz Service Binding is configured. The named publisher therefore returns `PUBLISHING_UNAVAILABLE` for valid requests.
 
 ## GitHub App identity and permissions
 
@@ -20,7 +20,7 @@ The App private key belongs only in Kirisame's trusted Worker secret configurati
 
 ### GitHub App configuration review checklist
 
-This remains a future review checklist. No GitHub App setting or credential is configured by the Phase 0.1/Phase 1 foundation.
+The implementation is ready for configuration review, but no GitHub App setting or credential has been changed for this phase.
 
 - Confirm the App identity is Kirisame, owner CyanAutomation, App ID 3345400.
 - Set only Metadata read, Contents read/write, and Pull requests read/write.
@@ -30,6 +30,9 @@ This remains a future review checklist. No GitHub App setting or credential is c
 - Do not configure a user OAuth flow or rely on the OAuth Client ID for machine authentication.
 - Store the private key only as a Kirisame Worker secret; define a reviewed rotation and revocation procedure before production use.
 - Confirm no webhook is required for v1. If a future webhook is added, define its signature verification and replay rules separately.
+- The App Homepage URL currently points to the general CyanAutomation portfolio. A Kirisame repository or Worker URL would be more specific. This is descriptive metadata, not an OAuth callback requirement; do not change it as part of this implementation.
+
+The runtime signs RS256 App JWTs with `iat` 60 seconds in the past and an expiry no more than 10 minutes after issue time. It accepts the configured App ID or optional Client ID as issuer, supports unencrypted PKCS#1 and PKCS#8 PEM keys, and does not log or persist the key. GitHub's requirements are in [JWT generation guidance](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app).
 
 ## Two independent repository gates
 
@@ -38,7 +41,7 @@ A repository is publishable only when both conditions hold:
 1. The GitHub App installation has access to that repository.
 2. Kirisame's own explicit allowlist authorizes that exact lower-case owner/name and the requested branch/PR operation.
 
-Installation does not imply Kirisame policy authorization. Kirisame does not infer permission from a request's repository field, from a caller-selected installation ID, or from the presence of a working token. Resolve the installation from the configured App and exact repository after allowlist validation.
+Installation does not imply Kirisame policy authorization. Kirisame does not infer permission from a request's repository field, from a caller-selected installation ID, or from the presence of a working token. Resolve the installation from the configured App and exact repository after allowlist validation. `GITHUB_REPOSITORY_ALLOWLIST` is strict JSON with entries containing exactly `owner`, `repository`, `operations`, and `baseBranches`; wildcards and extra fields are rejected. See [GitHub App setup](GITHUB-APP.md) for an example.
 
 ## Request authentication and provenance
 
@@ -57,14 +60,14 @@ Soyuz must load canonical run state and trusted validation evidence, resolve the
 - Never force-update, delete or overwrite a pre-existing branch. Use GitHub ref updates only with force disabled if a future operation explicitly requires an update; v1 does not update an existing ref.
 - Let repository rules and branch protections reject the operation. Do not bypass protections or request bypass permissions. A protected publication branch may produce a policy rejection.
 - Do not merge pull requests, invoke repository scripts, execute Git commands, or expose a generic GitHub API proxy.
-- Reject .git metadata paths and unsupported path/mode types as defined in [Artifacts](ARTIFACTS.md).
+- Reject .git metadata paths and unsupported path/mode types as defined in [Artifacts](ARTIFACTS.md). Reject artifact changes to any `.gitattributes` file, reject changed files governed by an LFS filter in the pinned base tree, and fail closed on unsupported attribute patterns or active filters.
 - Treat GitHub 401/403 permission failures as policy/configuration failures. Do not retry them as network failures. Handle rate limits and transient 5xx responses under the bounded rules in [Lifecycle](LIFECYCLE.md).
 
 GitHub's Update a Reference API defaults to non-force updates and rejects conflicts; v1 uses create-only branch references and does not request force behavior. See [Git references](https://docs.github.com/en/rest/git/refs). Direct writes to protected branches are outside the contract.
 
 ## Pull request and retry safety
 
-Before creating a pull request, list PRs for the exact repository, head and base. A PR body includes a machine-readable Kirisame marker containing publicationId, runId and artifactDigest so a lost create response can be reconciled. If one matching open PR exists, return it. If the matching PR is closed or merged, or more than one conflicting PR exists, return a structured conflict; do not reopen, create a duplicate, or change unrelated PR metadata.
+Before creating a pull request, list PRs for the exact repository, head and base. A PR body includes a machine-readable Kirisame marker containing publicationId, runId, artifactDigest and a digest of the full immutable request, including mode, title and body. Existing PR reconciliation checks exact repository identities, head/base refs, title and body as well as the marker. If one matching open PR exists, return it. If the matching PR is closed or merged, or more than one conflicting PR exists, return a structured conflict; do not reopen, create a duplicate, or change unrelated PR metadata.
 
 Never treat a timeout as proof that a GitHub mutation failed. Re-read refs and PRs first. A branch whose commit or marker does not match the request is a permanent conflict. A retryable result may include a confirmed branch without a PR so Soyuz can retry the same publication identity after backoff.
 

@@ -10,7 +10,7 @@
     },
     "mode": "pr",
     "baseRef": "main",
-    "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baseSha": "64e2e8195e5a4bc0a1a201603481e9d88cc4e37d",
     "headRef": "kirisame/p/019a6000-0000-7000-8000-000000000001",
     "title": "Improve the example service",
     "body": "Add a small documentation change and remove an obsolete file.",
@@ -23,7 +23,7 @@
         "name": "demo-app"
       },
       "baseRef": "main",
-      "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseSha": "64e2e8195e5a4bc0a1a201603481e9d88cc4e37d",
       "fileCount": 3,
       "totalBytes": 29,
       "files": [
@@ -41,7 +41,7 @@
         {
           "operation": "modify",
           "path": "docs/guide.md",
-          "baseBlobSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "baseBlobSha": "5e79ed28bc2daaa432e8ca9b1ebd0f11da3a387a",
           "content": {
             "mediaType": "text/plain; charset=utf-8",
             "encoding": "base64",
@@ -53,10 +53,10 @@
         {
           "operation": "delete",
           "path": "obsolete.txt",
-          "baseBlobSha": "cccccccccccccccccccccccccccccccccccccccc"
+          "baseBlobSha": "44f668fb7497740876afdb0a7cacddb9eddbdbf1"
         }
       ]
     },
-    "artifactDigest": "sha256:71dadb8ce72e55a2f83dc8d01758bfe193b3f8fa8b68f388ebc99da512554b06"
+    "artifactDigest": "sha256:0431e0e1ee61b9b2c10cdced895c6c879f168b47a8527c4732ceccae2a94dd10"
   }
 }

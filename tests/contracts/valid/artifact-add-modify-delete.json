@@ -9,7 +9,7 @@
       "name": "demo-app"
     },
     "baseRef": "main",
-    "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "baseSha": "64e2e8195e5a4bc0a1a201603481e9d88cc4e37d",
     "fileCount": 3,
     "totalBytes": 29,
     "files": [
@@ -27,7 +27,7 @@
       {
         "operation": "modify",
         "path": "docs/guide.md",
-        "baseBlobSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "baseBlobSha": "5e79ed28bc2daaa432e8ca9b1ebd0f11da3a387a",
         "content": {
           "mediaType": "text/plain; charset=utf-8",
           "encoding": "base64",
@@ -39,7 +39,7 @@
       {
         "operation": "delete",
         "path": "obsolete.txt",
-        "baseBlobSha": "cccccccccccccccccccccccccccccccccccccccc"
+        "baseBlobSha": "44f668fb7497740876afdb0a7cacddb9eddbdbf1"
       }
     ]
   }

@@ -3,8 +3,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import branchFixture from "../contracts/valid/branch-publication-request.json";
 import prFixture from "../contracts/valid/pr-publication-request.json";
 import type { PublicationRequest, PublisherResponse } from "../../src/contracts/types.js";
+import { canonicalizeJson } from "../../src/contracts/canonicalize.js";
+import { bytesToBase64, sha256Hex, utf8 } from "../../src/contracts/integrity.js";
 import { validateResultAgainstRequest } from "../../src/contracts/validate.js";
 import { MockGitHubAdapter } from "../../src/github/MockGitHubAdapter.js";
+import { gitBlobSha } from "../../src/github/git-objects.js";
 import { AllowlistedPublicationPolicy } from "../../src/publication/policy.js";
 import { PublicationService } from "../../src/publication/service.js";
 
@@ -42,6 +45,50 @@ async function harness(request: PublicationRequest) {
     new AllowlistedPublicationPolicy([request.repository]),
   );
   return { adapter, service };
+}
+
+async function refreshRequest(request: PublicationRequest, baseSha?: string): Promise<void> {
+  if (baseSha) {
+    request.baseSha = baseSha;
+    request.artifact.baseSha = baseSha;
+  }
+  request.artifact.fileCount = request.artifact.files.length;
+  request.artifact.totalBytes = request.artifact.files.reduce(
+    (total, file) => total + (file.operation === "delete" ? 0 : file.content.byteLength), 0,
+  );
+  const canonical = canonicalizeJson(request.artifact);
+  if (canonical === undefined) throw new Error("fixture artifact did not canonicalize");
+  request.artifactDigest = `sha256:${await sha256Hex(utf8(canonical))}`;
+}
+
+async function setContent(
+  file: Exclude<PublicationRequest["artifact"]["files"][number], { operation: "delete" }>,
+  value: string,
+): Promise<void> {
+  const bytes = utf8(value);
+  file.content.data = bytesToBase64(bytes);
+  file.content.byteLength = bytes.byteLength;
+  file.content.sha256 = await sha256Hex(bytes);
+}
+
+async function seedAttributes(
+  request: PublicationRequest,
+  adapter: MockGitHubAdapter,
+  path: string,
+  text: string,
+): Promise<void> {
+  const base = await adapter.readCommit(request.repository, request.baseSha);
+  if (!base) throw new Error("base commit fixture is missing");
+  const bytes = utf8(text);
+  const sha = await gitBlobSha(bytes);
+  await adapter.setBaseBlob(request.repository, sha, bytes);
+  const baseSha = await adapter.setBaseTreeEntry(request.repository, base.treeSha, {
+    path,
+    mode: "100644",
+    type: "blob",
+    sha,
+  });
+  await refreshRequest(request, baseSha);
 }
 
 afterEach(async () => {
@@ -121,16 +168,33 @@ describe("mock publication application", () => {
     expect(adapter.count("createRef")).toBe(0);
   });
 
-  it("completes a valid existing branch whose PR was not created", async () => {
-    const branchRequest = makeRequest("branch");
-    const { adapter, service } = await harness(branchRequest);
-    expect((await service.publish(branchRequest)).outcome).toBe("branch_published");
-    const prRequest = makeRequest("pr", branchRequest.publicationId);
+  it("completes the same PR publication when its branch exists but its PR is missing", async () => {
+    const request = makeRequest("pr");
+    const { adapter, service } = await harness(request);
+    adapter.injectFault("listPullRequests", { code: "GITHUB_TIMEOUT" });
 
-    const result = await service.publish(prRequest);
+    const partial = await service.publish(request);
+    expect(partial.outcome).toBe("retryable_failure");
+    expect(partial.branch?.ref).toBe(request.headRef);
+
+    const result = await service.publish(request);
     expect(result.outcome).toBe("pr_published");
     expect(result.branch?.reused).toBe(true);
     expect(adapter.count("createRef")).toBe(1);
+  });
+
+  it("rejects reuse of a publication ID when authorized PR metadata changes", async () => {
+    const request = makeRequest("pr");
+    const { adapter, service } = await harness(request);
+    expect((await service.publish(request)).outcome).toBe("pr_published");
+    const changed = structuredClone(request);
+    changed.body = `${changed.body} A different authorized request.`;
+
+    const replay = await service.publish(changed);
+    expect(replay.outcome).toBe("blocked");
+    expect(replay.error?.code).toBe("BRANCH_CONFLICT");
+    expect(adapter.count("createRef")).toBe(1);
+    expect(adapter.count("createPullRequest")).toBe(1);
   });
 
   it("blocks an unrelated deterministic branch without overwriting it", async () => {
@@ -199,12 +263,24 @@ describe("mock publication application", () => {
     const request = makeRequest("branch");
     const { adapter, service } = await harness(request);
     const base = await adapter.readCommit(request.repository, request.baseSha);
-    await adapter.setBaseTreeEntry(request.repository, base!.treeSha, {
+    if (!base) throw new Error("base commit fixture is missing");
+    let objectSha = request.artifact.files.find((file) => file.operation === "modify")?.baseBlobSha;
+    if (mode === "120000") {
+      const bytes = utf8("docs/guide.md\n");
+      objectSha = await gitBlobSha(bytes);
+      await adapter.setBaseBlob(request.repository, objectSha, bytes);
+    } else if (mode === "160000") {
+      objectSha = base.sha;
+    }
+    const updatedBaseSha = await adapter.setBaseTreeEntry(request.repository, base.treeSha, {
       path: "docs/guide.md",
       mode,
       type,
-      sha: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      sha: objectSha!,
     });
+    const change = request.artifact.files.find((file) => file.operation === "modify");
+    if (change?.operation === "modify") change.baseBlobSha = objectSha!;
+    await refreshRequest(request, updatedBaseSha);
     const result = await service.publish(request);
 
     expect(result.error?.code).toBe("UNSUPPORTED_GIT_OBJECT");
@@ -217,7 +293,19 @@ describe("mock publication application", () => {
     expect(change?.operation).toBe("modify");
     if (change?.operation !== "modify") throw new Error("expected modify fixture");
     const { adapter, service } = await harness(request);
-    adapter.setBaseBlob(request.repository, change.baseBlobSha, new TextEncoder().encode("version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 5\n"));
+    const bytes = utf8("version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 5\n");
+    const pointerSha = await gitBlobSha(bytes);
+    await adapter.setBaseBlob(request.repository, pointerSha, bytes);
+    const base = await adapter.readCommit(request.repository, request.baseSha);
+    if (!base) throw new Error("base commit fixture is missing");
+    const updatedBaseSha = await adapter.setBaseTreeEntry(request.repository, base.treeSha, {
+      path: change.path,
+      mode: "100644",
+      type: "blob",
+      sha: pointerSha,
+    });
+    change.baseBlobSha = pointerSha;
+    await refreshRequest(request, updatedBaseSha);
 
     const lfs = await service.publish(request);
     expect(lfs.error?.code).toBe("UNSUPPORTED_GIT_OBJECT");
@@ -228,15 +316,131 @@ describe("mock publication application", () => {
     const request = makeRequest("branch");
     const { adapter, service } = await harness(request);
     const base = await adapter.readCommit(request.repository, request.baseSha);
-    await adapter.setBaseTreeEntry(request.repository, base!.treeSha, {
+    if (!base) throw new Error("base commit fixture is missing");
+    const treeEntry = (await adapter.readTree(request.repository, base.treeSha)).find((entry) => entry.path === "docs");
+    if (!treeEntry) throw new Error("nested tree fixture is missing");
+    const updatedBaseSha = await adapter.setBaseTreeEntry(request.repository, base.treeSha, {
       path: "README.md",
       mode: "040000",
       type: "tree",
-      sha: "ffffffffffffffffffffffffffffffffffffffff",
+      sha: treeEntry.sha,
     });
+    await refreshRequest(request, updatedBaseSha);
 
     const result = await service.publish(request);
     expect(result.error?.code).toBe("BASE_TREE_CONFLICT");
+    expect(adapter.count("createBlob")).toBe(0);
+  });
+
+  it("rejects a modified text file whose bytes already match the base", async () => {
+    const request = makeRequest("branch");
+    const modify = request.artifact.files.find((file) => file.operation === "modify");
+    if (!modify || modify.operation !== "modify") throw new Error("modify fixture is missing");
+    await setContent(modify, "Current guide.\n");
+    request.artifact.files = [modify];
+    await refreshRequest(request);
+    const { adapter, service } = await harness(request);
+
+    const result = await service.publish(request);
+    expect(result.outcome).toBe("blocked");
+    expect(result.error?.code).toBe("NO_CHANGES");
+    expect(adapter.count("createBlob")).toBe(0);
+    expect(adapter.count("createTree")).toBe(0);
+    expect(adapter.count("createCommit")).toBe(0);
+    expect(adapter.count("createRef")).toBe(0);
+  });
+
+  it("rejects multiple normalized modifications that collectively leave the tree unchanged", async () => {
+    const request = makeRequest("branch");
+    const original = request.artifact.files.find((file) => file.operation === "modify");
+    if (!original || original.operation !== "modify") throw new Error("modify fixture is missing");
+    const guide = structuredClone(original);
+    await setContent(guide, "Current guide.\n");
+    const obsolete = structuredClone(original);
+    obsolete.path = "obsolete.txt";
+    obsolete.baseBlobSha = "44f668fb7497740876afdb0a7cacddb9eddbdbf1";
+    await setContent(obsolete, "Obsolete file.\n");
+    request.artifact.files = [guide, obsolete];
+    await refreshRequest(request);
+    const { adapter, service } = await harness(request);
+
+    const result = await service.publish(request);
+    expect(result.error?.code).toBe("NO_CHANGES");
+    expect(adapter.count("createBlob")).toBe(0);
+    expect(adapter.count("createRef")).toBe(0);
+  });
+
+  it("rejects an added Git LFS pointer before any Git object write", async () => {
+    const request = makeRequest("branch");
+    const pointer = utf8("version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 5\n");
+    const sha = await sha256Hex(pointer);
+    request.artifact.files = [{
+      operation: "add",
+      path: "archive.bin",
+      content: { mediaType: "text/plain; charset=utf-8", encoding: "base64", byteLength: pointer.byteLength, sha256: sha, data: bytesToBase64(pointer) },
+    }];
+    await refreshRequest(request);
+    const { adapter, service } = await harness(request);
+
+    await expect(service.publish(request)).rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
+    expect(adapter.operations).toEqual([]);
+  });
+
+  it("rejects a root .gitattributes modification before touching the adapter", async () => {
+    const request = makeRequest("branch");
+    const bytes = utf8("*.bin filter=lfs\n");
+    request.artifact.files = [{
+      operation: "add",
+      path: ".gitattributes",
+      content: { mediaType: "text/plain; charset=utf-8", encoding: "base64", byteLength: bytes.byteLength, sha256: await sha256Hex(bytes), data: bytesToBase64(bytes) },
+    }];
+    await refreshRequest(request);
+    const { adapter, service } = await harness(request);
+
+    await expect(service.publish(request)).rejects.toMatchObject({ code: "UNSUPPORTED_GIT_OBJECT" });
+    expect(adapter.operations).toEqual([]);
+  });
+
+  it("rejects a file matched by a root Git LFS filter", async () => {
+    const request = makeRequest("branch");
+    const { adapter, service } = await harness(request);
+    await seedAttributes(request, adapter, ".gitattributes", "*.md filter=lfs diff=lfs merge=lfs -text\n");
+
+    const result = await service.publish(request);
+    expect(result.error?.code).toBe("UNSUPPORTED_GIT_OBJECT");
+    expect(adapter.count("createBlob")).toBe(0);
+  });
+
+  it("rejects a file matched by a nested Git LFS filter", async () => {
+    const request = makeRequest("branch");
+    const { adapter, service } = await harness(request);
+    await seedAttributes(request, adapter, "docs/.gitattributes", "*.md filter=lfs\n");
+
+    const result = await service.publish(request);
+    expect(result.error?.code).toBe("UNSUPPORTED_GIT_OBJECT");
+    expect(adapter.count("createBlob")).toBe(0);
+  });
+
+  it("allows changed text files outside the pinned LFS patterns", async () => {
+    const request = makeRequest("branch");
+    const { adapter, service } = await harness(request);
+    await seedAttributes(request, adapter, ".gitattributes", "*.bin filter=lfs diff=lfs merge=lfs -text\n");
+
+    const result = await service.publish(request);
+    expect(result.outcome).toBe("branch_published");
+    expect(adapter.count("createRef")).toBe(1);
+  });
+
+  it.each([
+    "**/*.bin filter=lfs\n",
+    "*.md working-tree-encoding=UTF-16\n",
+  ])("fails closed on unsupported Git attributes config %s", async (attributes) => {
+    const request = makeRequest("branch");
+    const { adapter, service } = await harness(request);
+    await seedAttributes(request, adapter, ".gitattributes", attributes);
+
+    const result = await service.publish(request);
+    expect(result.error?.code).toBe("UNSUPPORTED_GIT_OBJECT");
     expect(adapter.count("createBlob")).toBe(0);
   });
 

@@ -39,7 +39,7 @@ Kirisame computes and validates the same artifact digest but has no durable oper
 For every request, validate its contract, artifact provenance, canonical digest, file contents and repository policy before GitHub mutations. Reconciliation then follows the publication ref first:
 
 1. Read the deterministic head ref `kirisame/p/{publicationId}` before resolving the current target base ref.
-2. If the head ref exists, read its commit and tree. Reuse it only when its parent is the requested `baseSha`, its commit marker identifies the same publicationId/runId/artifactDigest, and its full tree matches the expected artifact. Otherwise return `BRANCH_CONFLICT` without modifying the ref.
+2. If the head ref exists, read its commit and tree. Reuse it only when its parent is the requested `baseSha`, its commit marker identifies the same publicationId/runId/artifactDigest and complete request digest, and its full tree matches the expected artifact. Otherwise return `BRANCH_CONFLICT` without modifying the ref.
 3. For `branch` mode, return `branch_published` after confirming that matching commit.
 4. For `pr` mode, list PRs for the exact repository, head and base, including closed PRs. Return a matching open PR as confirmed success even if the target branch has since advanced. A closed, merged, duplicate or mismatched PR is `PULL_REQUEST_CONFLICT`.
 5. If a matching branch exists but no PR exists, read the target base ref. Create the PR only if it still equals the requested `baseSha`; otherwise return `BASE_MOVED`, preserving the branch as partial progress.
@@ -50,7 +50,7 @@ For every request, validate its contract, artifact provenance, canonical digest,
 
 The ordering matters: once the deterministic branch and matching open PR prove that this publication completed, later movement of the target branch does not invalidate that result. Base equality is required before new branch writes and before completing an existing branch whose PR is still missing. The implementation does not silently rebase, force-update refs or claim exactly-once writes.
 
-The GitHub REST Git Data API can create blobs, trees, commits and refs. Ref creation is deliberately create-only; updates are not used in v1. Pull requests are separately created and reconciled using head, base and a Kirisame publication marker. See [Git trees](https://docs.github.com/en/rest/git/trees), [Git commits](https://docs.github.com/en/rest/git/commits), [Git references](https://docs.github.com/en/rest/git/refs), and [Pull Requests](https://docs.github.com/en/rest/pulls/pulls).
+The GitHub REST Git Data API can create blobs, trees, commits and refs. Ref creation is deliberately create-only; updates are not used in v1. Pull requests are separately created and reconciled using repository identities, head, base, exact title/body, and a Kirisame publication marker. The real adapter reads trees recursively by fetching each subtree and rejects truncation, bounds traversal to 50,000 entries and depth 64, paginates PR reads (up to 20 pages), verifies blob bytes against Git object SHA-1, and bounds API responses. See [Git trees](https://docs.github.com/en/rest/git/trees), [Git commits](https://docs.github.com/en/rest/git/commits), [Git references](https://docs.github.com/en/rest/git/refs), and [Pull Requests](https://docs.github.com/en/rest/pulls/pulls).
 
 ## Required retry cases
 
@@ -75,7 +75,7 @@ Do not claim exactly-once GitHub writes. A lost response can occur after a write
 | --- | --- | --- |
 | invalid | Unsupported contract version, malformed schema, unsafe path, digest mismatch, unsupported file type. | No |
 | policy | Untrusted caller, repository not allowlisted, installation missing, permission denial. | No |
-| conflict | Base moved, mismatched pre-existing branch, closed/merged or conflicting PR. | No; new authorization may be required. |
+| conflict | Base moved, mismatched pre-existing branch, closed/merged or conflicting PR, or `NO_CHANGES` because the normalized artifact leaves the pinned tree unchanged. | No; a changed artifact requires new authorization and a new publication ID. |
 | retryable | GitHub rate limit, network timeout, 5xx, token endpoint unavailable, or reconciliation itself unavailable. | Yes, using same request after backoff. |
 | internal | Unexpected Kirisame defect with no safe classification. | No by default; inspect redacted diagnostics. |
 
@@ -83,7 +83,7 @@ The API returns a bounded error code, classification, safe message, optional ret
 
 ## Timeout and backoff proposal
 
-Proposed integration defaults, to validate before live GitHub publishing: Soyuz gives one Service Binding attempt up to 120 seconds; each outbound GitHub request has a 15-second timeout. A transport timeout is an uncertain outcome, not a failed mutation. Soyuz retries the identical request after bounded exponential backoff with jitter, starting at 2 seconds and capped at 5 minutes. It honors GitHub Retry-After up to a one-hour delay and persists the next attempt time. After three immediate transient failures, it yields to the durable Soyuz scheduler rather than looping in one Worker invocation. These values are policy proposals, not implemented runtime behavior.
+The real adapter uses a 10-second per-request timeout by default; the configured range is 100 ms to 30 seconds. A transport timeout is an uncertain outcome, not a failed mutation. Soyuz integration defaults still need review: one Service Binding attempt up to 120 seconds; durable retries of the identical request after bounded exponential backoff with jitter, starting at 2 seconds and capped at 5 minutes; honor GitHub Retry-After up to a one-hour delay; and yield after three immediate transient failures. These remain Soyuz policy proposals, not implemented scheduling behavior in Kirisame.
 
 ## Persistence decision
 

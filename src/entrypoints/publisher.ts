@@ -3,6 +3,7 @@ import { validateContract } from "../contracts/validate.js";
 import type { PublicationError, PublicationRequest, PublicationResult, PublisherResponse } from "../contracts/types.js";
 import { asPublicationFailure, PublicationFailure } from "../errors/publication-error.js";
 import { PublicationService } from "../publication/service.js";
+import { createProductionPublicationService, type PublisherRuntimeEnvironment } from "../publication/runtime.js";
 import { utf8 } from "../contracts/integrity.js";
 
 export const MAX_REQUEST_BODY_BYTES = 9 * 1024 * 1024;
@@ -11,7 +12,12 @@ type Publish = (request: PublicationRequest) => Promise<PublicationResult>;
 /** Private typed-RPC entrypoint. Production publishing is explicitly unavailable in this phase. */
 export class PublisherEntrypoint extends WorkerEntrypoint {
   async publish(requestJson: string): Promise<PublisherResponse> {
-    return handlePublisherJson(requestJson, async (request) => unavailableResult(request));
+    const environment = this.env as unknown as PublisherRuntimeEnvironment;
+    return handlePublisherJson(requestJson, async (request) => {
+      if (environment.PUBLISHING_ENABLED !== "true") return unavailableResult(request);
+      const service = await createProductionPublicationService(environment);
+      return service.publish(request);
+    });
   }
 }
 
@@ -21,6 +27,7 @@ export async function handlePublisherJson(
   publish: Publish | PublicationService,
 ): Promise<PublisherResponse> {
   const requestId = crypto.randomUUID();
+  const startedAt = Date.now();
   if (typeof requestJson !== "string") {
     return invalidResponse("INVALID_REQUEST", "The private RPC payload must be a JSON string.", requestId);
   }
@@ -48,6 +55,9 @@ export async function handlePublisherJson(
     if (semanticCode === "ARTIFACT_PROVENANCE_MISMATCH") {
       return invalidResponse("ARTIFACT_PROVENANCE_MISMATCH", "The artifact does not match the authorized execution.", requestId);
     }
+    if (semanticCode === "UNSUPPORTED_GIT_ATTRIBUTES_CHANGE") {
+      return new PublicationFailure("UNSUPPORTED_GIT_OBJECT").toContractError(requestId);
+    }
     return invalidResponse(semanticCode ? "ARTIFACT_INVALID" : "INVALID_REQUEST", "The publication request failed contract validation.", requestId);
   }
 
@@ -56,11 +66,31 @@ export async function handlePublisherJson(
     : publish;
   try {
     const result = await application(value as PublicationRequest);
-    console.info(JSON.stringify({ operation: "publication", requestId, publicationId: result.publicationId, outcome: result.outcome }));
+    console.info(JSON.stringify({
+      operation: "publication",
+      requestId,
+      publicationId: result.publicationId,
+      runId: result.runId,
+      mode: result.mode,
+      outcome: result.outcome,
+      retryable: result.retryable,
+      reconciliation: result.reconciliation,
+      durationMs: Date.now() - startedAt,
+    }));
     return result;
   } catch (error) {
     const failure = asPublicationFailure(error);
-    console.warn(JSON.stringify({ operation: "publication", requestId, code: failure.code, classification: failure.classification }));
+    const requestRecord = isRecord(value) ? value : undefined;
+    console.warn(JSON.stringify({
+      operation: "publication",
+      requestId,
+      ...(typeof requestRecord?.publicationId === "string" ? { publicationId: requestRecord.publicationId } : {}),
+      ...(typeof requestRecord?.runId === "string" ? { runId: requestRecord.runId } : {}),
+      code: failure.code,
+      classification: failure.classification,
+      retryable: failure.classification === "retryable",
+      durationMs: Date.now() - startedAt,
+    }));
     return failure.toContractError(requestId);
   }
 }
