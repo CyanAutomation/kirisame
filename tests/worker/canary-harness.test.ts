@@ -3,6 +3,7 @@ import publicationRequest from "../contracts/valid/pr-publication-request.json";
 import publicationResult from "../contracts/valid/successful-pr-result.json";
 import type { PublisherResponse } from "../../src/contracts/types.js";
 import { handleCanaryRequest } from "../../src/canary/harness.js";
+import { MAX_REQUEST_BODY_BYTES } from "../../src/entrypoints/publisher.js";
 
 const requestJson = JSON.stringify(publicationRequest.value);
 const enabled = {
@@ -28,6 +29,36 @@ describe("private canary harness", () => {
       first: { outcome: "pr_published" },
       replay: { outcome: "pr_published" },
     });
+  });
+
+  it("preserves a confirmed first publication when the replay call throws", async () => {
+    let calls = 0;
+    const publisher = {
+      publish: async (): Promise<PublisherResponse> => {
+        calls += 1;
+        if (calls === 2) throw new Error("replay response lost");
+        return publicationResult.value as PublisherResponse;
+      },
+    };
+
+    const response = await handleCanaryRequest(localRequest(requestJson), { ...enabled, KIRISAME: publisher });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      first: { outcome: "pr_published" },
+      replay: null,
+    });
+  });
+
+  it("enforces the request byte limit while streaming", async () => {
+    let called = false;
+    const response = await handleCanaryRequest(
+      localRequest("x".repeat(MAX_REQUEST_BODY_BYTES + 1)),
+      { ...enabled, KIRISAME: { publish: async () => { called = true; return publicationResult.value as PublisherResponse; } } },
+    );
+
+    expect(response.status).toBe(400);
+    expect(called).toBe(false);
   });
 
   it("does not invoke the publisher for non-loopback requests", async () => {

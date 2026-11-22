@@ -1,6 +1,5 @@
 import { validateContract } from "../contracts/validate.js";
 import type { PublicationRequest, PublisherResponse } from "../contracts/types.js";
-import { utf8 } from "../contracts/integrity.js";
 import { MAX_REQUEST_BODY_BYTES } from "../entrypoints/publisher.js";
 
 interface CanaryPublisherBinding {
@@ -61,7 +60,12 @@ export async function handleCanaryRequest(request: Request, environment: unknown
     const publisher = canaryEnvironment.KIRISAME;
     const first = await publisher.publish(requestJson);
     if (!isConfirmedPr(first)) return json({ first, replay: null }, 200);
-    const replay = await publisher.publish(requestJson);
+    let replay: PublisherResponse | null = null;
+    try {
+      replay = await publisher.publish(requestJson);
+    } catch {
+      // Preserve the confirmed first result if only the replay call fails.
+    }
     return json({ first, replay }, 200);
   } catch {
     return json({ code: "CANARY_UNCERTAIN", message: "The private publisher call did not return a confirmed result. Reuse the identical request for reconciliation." }, 503);
@@ -95,7 +99,7 @@ async function readRequestJson(request: Request): Promise<string | undefined> {
   }
   try {
     const value = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return utf8(value).byteLength <= MAX_REQUEST_BODY_BYTES ? value : undefined;
+    return value;
   } catch {
     return undefined;
   }
