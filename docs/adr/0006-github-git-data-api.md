@@ -22,6 +22,8 @@ The Git Data endpoints expose the exact bounded operations required, support ins
 
 ## Consequences and trade-offs
 
-Kirisame must explicitly validate base tree paths, file operations and commit ancestry. Git LFS, executable bits, symlinks, submodules and arbitrary Git features remain unsupported. The API is less flexible than full Git but substantially narrows authority.
+Kirisame explicitly validates base tree paths, file operations and commit ancestry. The real adapter bounds responses and traversal, reads subtrees rather than trusting a recursive response, and rejects truncation or malformed object identities. Git LFS, executable bits, symlinks, submodules and arbitrary Git features remain unsupported. Artifact writes to `.gitattributes` are rejected; applicable base-tree filters are checked before writing. The API is less flexible than full Git but substantially narrows authority.
+
+Phase 2A implements this interface with a fixed GitHub API origin/version, redirect denial, timeout and response bounds, blob SHA verification, create-only refs, bounded PR pagination, and structured permission/rate-limit/transient error handling. The implementation is covered through injected HTTP responses; it has not been activated against a live repository.
 
 References: [Git Trees API](https://docs.github.com/en/rest/git/trees), [Git Commits API](https://docs.github.com/en/rest/git/commits), [Git References API](https://docs.github.com/en/rest/git/refs), and [Pull Requests API](https://docs.github.com/en/rest/pulls/pulls).

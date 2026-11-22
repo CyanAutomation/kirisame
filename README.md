@@ -6,7 +6,7 @@ Kirisame is a standalone, Cloudflare-native service designed to commit validated
 
 It provides a dedicated boundary between systems that **generate code** and systems authorised to **publish code**.
 
-> **Project status:** Phase 0.1 contract hardening and the Phase 1 Worker foundation are implemented. The diagnostics-only Worker is deployed at [kirisame.scheimann.workers.dev](https://kirisame.scheimann.workers.dev/). Its production publisher returns `PUBLISHING_UNAVAILABLE`; real GitHub authentication and writes, the Soyuz binding, and executor migration are not implemented.
+> **Project status:** Phase 0.1, Phase 1.1 publishing hardening, and Phase 2A GitHub App authentication and adapter code are implemented. The public Worker remains diagnostics-only. Its checked-in configuration disables publishing and has an empty repository allowlist; the live GitHub canary, Soyuz binding, and executor migration remain pending.
 
 ## Overview
 
@@ -64,7 +64,7 @@ Kirisame must not become a general-purpose remote Git command execution service.
 
 ## Intended GitHub authentication
 
-This authentication flow is not configured in the current Worker foundation. There is no GitHub App private key or live GitHub adapter in the deployed Worker.
+The Worker contains a Workers-compatible GitHub App authenticator and real GitHub REST adapter. Publishing remains disabled by default. No private key, installation, allowlist entry, or Soyuz Service Binding is configured in the checked-in deployment settings.
 
 When production publishing is implemented, Kirisame will use the dedicated GitHub App.
 
@@ -79,15 +79,15 @@ When production publishing is implemented, Kirisame will use the dedicated GitHu
 
 ### Authentication flow
 
-The intended flow uses the GitHub App private key and configured App ID.
+The runtime uses the GitHub App private key and configured App ID to:
 
 For each authorised publication, the service:
 
-1. Resolves the appropriate GitHub App installation.
-2. Generates a short-lived signed GitHub App JWT.
-3. Requests an installation access token scoped to the intended repository and necessary permissions.
-4. Uses the installation token to perform the approved GitHub operations.
-5. Discards the token after use.
+1. Enforce the exact repository, operation and base-branch allowlist before contacting GitHub.
+2. Resolve the App installation for that repository and verify its owner, App ID, suspension state and required permissions.
+3. Generate a short-lived RS256 JWT and request an installation token for exactly one repository with contents write, adding pull-requests write only for PR mode.
+4. Verify the returned repository scope, permission set and expiry, then use the token for approved GitHub operations.
+5. Keep the token only in the request-local adapter and discard it after the call.
 
 Installation tokens must never be returned to Soyuz, coding executors or external callers.
 
@@ -223,7 +223,7 @@ Kirisame is designed as a lightweight, Cloudflare-native TypeScript service.
 
 | Component | Purpose |
 |---|---|
-| Cloudflare Workers | Run the current diagnostics-only Worker; future GitHub publication operations |
+| Cloudflare Workers | Run the public diagnostics and the private, explicitly gated GitHub publisher |
 | Service Bindings | Intended private communication with Soyuz; not configured yet |
 | Worker Secrets | Intended GitHub App key storage; no secrets are configured |
 | Workers Observability | Structured operational logs and diagnostics |
@@ -234,7 +234,7 @@ Cloudflare D1, Queues or Workflows may be introduced when justified by publicati
 
 The intended private interface is a typed Cloudflare Service Binding named `KIRISAME`, with a separate `PublisherEntrypoint.publish(requestJson)` RPC. It accepts a JSON serialization of the v1 request and enforces a 9 MiB UTF-8 cap before parsing. No production binding is configured yet. The public Worker exposes only `/`, `/health` and `/readyz`; requests to `/internal/v1/publications` return 404 and cannot invoke publication logic.
 
-The named production publisher returns a structured `PUBLISHING_UNAVAILABLE` error for valid requests. The test-only binding injects a mock adapter and is not part of the production Worker entrypoint. Kirisame must not expose an unauthenticated public publishing endpoint.
+The checked-in production configuration returns a structured `PUBLISHING_UNAVAILABLE` error for valid requests. The test-only binding injects a mock adapter and is not part of the production Worker entrypoint. Kirisame must not expose an unauthenticated public publishing endpoint.
 
 Any future external API must have an explicit authentication, authorisation and rate-limiting model.
 
@@ -242,16 +242,17 @@ Local development and CI exercise mocked GitHub interactions without requiring p
 
 ### Configuration
 
-Anticipated configuration includes:
+The checked-in configuration includes these fail-closed settings:
 
-- `GITHUB_APP_ID` — Public GitHub App identifier.
-- `GITHUB_APP_PRIVATE_KEY` — GitHub App signing key, stored as a Worker secret.
-- Repository authorisation policy — The repositories and publication operations Kirisame may perform.
-- Cloudflare Service Binding configuration — Private service integration with Soyuz.
+- `PUBLISHING_ENABLED=false` — explicit commissioning gate.
+- `GITHUB_APP_ID=3345400` — public GitHub App identifier.
+- `GITHUB_APP_CLIENT_ID` — optional JWT issuer identifier.
+- `GITHUB_APP_PRIVATE_KEY` — Worker secret binding with no value in source control.
+- `GITHUB_REPOSITORY_ALLOWLIST=[]` — strict JSON repository, operation and base-branch policy; empty denies all repositories.
 
-These GitHub settings are not present in the current deployment. The intended future Service Binding is named `KIRISAME` and is documented in [Soyuz integration](docs/SOYUZ-INTEGRATION.md).
+Keep `PUBLISHING_ENABLED=false` until a private caller and approved canary target exist. The intended future Service Binding is named `KIRISAME` and is documented in [Soyuz integration](docs/SOYUZ-INTEGRATION.md). Readiness checks validate configuration only; they do not contact GitHub or prove that an installation is usable.
 
-Production credentials must never appear in source control, test fixtures, application logs or publication artifacts.
+Production credentials must never appear in source control, test fixtures, application logs or publication artifacts. See the [GitHub App setup guide](docs/GITHUB-APP.md) before configuring a private canary or rotating the key.
 
 ## Security model
 
@@ -349,16 +350,22 @@ New consumers should integrate through an authorised control-plane interface rat
 - **Implemented:** Sanitized structured errors and safe operation logs.
 - **Implemented:** GitHub adapter interface, allowlist policy and deterministic mock publisher.
 - **Implemented:** CI, linting, type checking, contract tests and Worker runtime tests.
-- **Not enabled:** Real GitHub publishing, production Service Binding and GitHub credentials.
+- **Default disabled:** Real GitHub writes, production Service Binding and GitHub credentials.
 
-### Phase 2 — GitHub App integration
+### Phase 1.1 — Publishing hardening
 
-- Integrate the Kirisame GitHub App.
-- Implement short-lived installation token generation.
-- Introduce repository and permission checks.
-- Implement Git object, commit and branch publication.
-- Implement pull request creation and reconciliation.
-- Add safe retry and failure handling.
+- **Implemented:** Git-compatible mock blob, tree and commit identifiers with nested tree behavior.
+- **Implemented:** Fail-closed Git LFS and `.gitattributes` checks, including nested rules and unsupported attributes.
+- **Implemented:** Deterministic no-op rejection, request-fingerprint markers, exact PR metadata reconciliation and truncated-tree rejection.
+
+### Phase 2A — GitHub App and real adapter
+
+- **Implemented:** Workers-compatible App JWT signing and traditional RSA private-key import.
+- **Implemented:** Installation lookup, exact-repository and minimum-permission token scoping, expiry checks and fail-closed configuration.
+- **Implemented:** Real GitHub REST Git Data and Pull Requests adapter with bounded requests, tree traversal, pagination, error classification and reconciliation.
+- **Implemented:** Injected-HTTP tests that drive the real publication service through simulated GitHub endpoints.
+- **Pending:** Authorised live canary against a disposable, approved repository and private deployment.
+- **Pending:** Configure the real App secret and installation; keep writes disabled by default.
 
 ### Phase 3 — Soyuz integration
 

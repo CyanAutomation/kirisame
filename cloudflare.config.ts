@@ -1,4 +1,4 @@
-import { defineConfig } from "cf/config";
+import { bindings, defineConfig } from "cf/config";
 import * as entrypoint from "./src/index.ts" with { type: "cf-worker" };
 
 export default defineConfig({
@@ -7,6 +7,13 @@ export default defineConfig({
     name: "kirisame",
     entrypoint,
     compatibilityDate: "2026-11-21",
+    env: {
+      PUBLISHING_ENABLED: bindings.text("false"),
+      GITHUB_APP_ID: bindings.text("3345400"),
+      GITHUB_APP_CLIENT_ID: bindings.text(""),
+      GITHUB_REPOSITORY_ALLOWLIST: bindings.text("[]"),
+      GITHUB_APP_PRIVATE_KEY: bindings.secret(),
+    },
     observability: {
       enabled: true,
       logs: { enabled: true, headSamplingRate: 0.2, invocationLogs: true },

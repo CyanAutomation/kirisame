@@ -14,7 +14,7 @@ Initial operations are:
 
 A rename is represented as a delete at the old path plus an add at the new path. The pair has no rename metadata. Empty manifests are rejected.
 
-Files always use Git mode 100644. The v1 contract does not support binary blobs, invalid UTF-8, symlinks, submodules/gitlinks, Git LFS objects, executable-mode changes, arbitrary tree modes, Git hooks, patch application, or repository shell scripts. Kirisame must return an explicit ARTIFACT_INVALID or policy error when it sees unsupported input; it must never omit an unsupported entry and publish the rest. Changes to .gitattributes that introduce Git LFS filters, or changes to files matched by an existing LFS rule, are rejected.
+Files always use Git mode 100644. The v1 contract does not support binary blobs, invalid UTF-8, symlinks, submodules/gitlinks, Git LFS objects, executable-mode changes, arbitrary tree modes, Git hooks, patch application, or repository shell scripts. Kirisame must return an explicit ARTIFACT_INVALID or policy error when it sees unsupported input; it must never omit an unsupported entry and publish the rest. All artifact changes to root or nested `.gitattributes` files are rejected. Before writing Git objects, Kirisame reads the pinned base tree's root and applicable nested attribute files. It rejects a changed file if a supported rule applies an active filter, and fails closed on active filters, `working-tree-encoding`, unsupported pattern syntax, or malformed/over-limit attribute data. Rules are interpreted from the pinned base commit only; the artifact cannot alter the rules in the same publication.
 
 ## Bounds
 
@@ -41,7 +41,7 @@ Paths are UTF-8 NFC normalized, slash-separated repository-relative paths. Rejec
 
 Reject exact duplicate paths, case-folded collisions, and a file path that is also an ancestor directory of another changed path. Require files to be sorted by unsigned UTF-8 byte order. Enforce one operation for each path. These semantic rules supplement the JSON Schema, which enforces field allowlists and basic syntax.
 
-Before writing Git objects, Kirisame reads the current base ref and requires its object SHA to equal baseSha. It reads the base tree and checks each operation: add requires an absent path; modify and delete require the declared baseBlobSha. Any mismatch fails closed. The base repository, baseRef and baseSha in the artifact must exactly equal the corresponding request values.
+Before writing Git objects, Kirisame reads the current base ref and requires its object SHA to equal baseSha. It reads the base tree and checks each operation: add requires an absent path; modify and delete require the declared baseBlobSha. Any mismatch fails closed. After applying changes in memory, it compares the complete expected leaf tree to the pinned base tree and returns `NO_CHANGES` when the result is identical, before creating blobs, trees, commits, or refs. The base repository, baseRef and baseSha in the artifact must exactly equal the corresponding request values.
 
 ## Content integrity and canonical digest
 

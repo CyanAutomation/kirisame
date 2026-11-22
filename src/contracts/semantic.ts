@@ -24,8 +24,10 @@ export const ERROR_CLASSIFICATIONS = {
   BASE_TREE_CONFLICT: "conflict",
   BRANCH_CONFLICT: "conflict",
   PULL_REQUEST_CONFLICT: "conflict",
+  NO_CHANGES: "conflict",
   UNSUPPORTED_GIT_OBJECT: "invalid",
   GITHUB_AUTH_UNAVAILABLE: "retryable",
+  GITHUB_AUTH_INVALID: "policy",
   GITHUB_RATE_LIMITED: "retryable",
   GITHUB_UNAVAILABLE: "retryable",
   GITHUB_TIMEOUT: "retryable",
@@ -86,6 +88,9 @@ async function artifactErrors(value: unknown): Promise<ValidationIssue[]> {
 
     if (foldedPath === ".github/workflows" || foldedPath.startsWith(".github/workflows/")) {
       errors.push(issue("UNSUPPORTED_WORKFLOW_PATH", "GitHub Actions workflow files are outside the publication contract"));
+    }
+    if (foldedPath === ".gitattributes" || foldedPath.endsWith("/.gitattributes")) {
+      errors.push(issue("UNSUPPORTED_GIT_ATTRIBUTES_CHANGE", "Changes to .gitattributes are outside the publication contract"));
     }
 
     if ("content" in file) {
@@ -247,8 +252,7 @@ export async function validateResultForRequest(requestValue: unknown, resultValu
     errors.push(issue("RESULT_BRANCH_MISMATCH", "returned branch ref must match the authorized request"));
   }
   if (result.pullRequest) {
-    const expectedPrefix = `https://github.com/${request.repository.owner}/${request.repository.name}/pull/`;
-    if (!result.pullRequest.url.startsWith(expectedPrefix)) {
+    if (!isPullRequestUrlForRepository(result.pullRequest.url, request.repository, result.pullRequest.number)) {
       errors.push(issue("RESULT_PULL_REQUEST_MISMATCH", "pull request URL must match the authorized repository"));
     }
   }
@@ -256,4 +260,15 @@ export async function validateResultForRequest(requestValue: unknown, resultValu
     errors.push(issue("MALFORMED_RESULT", "PR publication is complete only with a confirmed open pull request"));
   }
   return errors;
+}
+
+function isPullRequestUrlForRepository(value: string, repository: PublicationRequest["repository"], number: number): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "github.com"
+      && url.pathname.toLowerCase() === `/${repository.owner}/${repository.name}/pull/${number}`.toLowerCase()
+      && !url.search && !url.hash && !url.username && !url.password;
+  } catch {
+    return false;
+  }
 }

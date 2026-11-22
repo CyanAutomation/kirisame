@@ -11,7 +11,7 @@ import type {
 
 /** Narrow boundary for the GitHub Git Data and Pull Requests APIs. */
 export interface GitHubAdapter {
-  resolveRepository(repository: Repository): Promise<RepositoryIdentity>;
+  resolveRepository(repository: Repository, operation: "branch" | "pr"): Promise<RepositoryIdentity>;
   readRef(repository: Repository, ref: string): Promise<string | undefined>;
   readCommit(repository: Repository, sha: string): Promise<GitCommit | undefined>;
   readTree(repository: Repository, treeSha: string): Promise<GitTreeEntry[]>;

@@ -36,6 +36,9 @@ export interface PullRequestRecord {
   state: "open" | "closed" | "merged";
   headRef: string;
   baseRef: string;
+  headRepository: Repository;
+  baseRepository: Repository;
+  title: string;
   body: string;
 }
 
@@ -61,5 +64,6 @@ export type GitHubOperation =
 
 export interface RepositoryIdentity extends Repository {
   fullName: string;
-  installationId?: number;
+  id: number;
+  installationId: number;
 }
