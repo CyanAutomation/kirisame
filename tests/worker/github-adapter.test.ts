@@ -150,6 +150,54 @@ describe("GitHub REST Git Data adapter", () => {
     await expect(invalidMode.adapter.readTree(repository, root)).rejects.toMatchObject({ code: "UNSUPPORTED_GIT_OBJECT" });
   });
 
+  it("keeps concurrent tree entry limits isolated per traversal", async () => {
+    const firstTree = "1".repeat(40);
+    const secondTree = "2".repeat(40);
+    const entries = Array.from({ length: 25_001 }, (_, index) => ({
+      path: `file-${index}`,
+      mode: "100644",
+      type: "blob",
+      sha: "3".repeat(40),
+    }));
+    const fixture = createAdapterFixture({ apiHandler: async (url) => {
+      if (url.pathname.endsWith(`/git/trees/${firstTree}`)) {
+        return json({ sha: firstTree, truncated: false, tree: entries });
+      }
+      if (url.pathname.endsWith(`/git/trees/${secondTree}`)) {
+        return json({ sha: secondTree, truncated: false, tree: entries });
+      }
+      return undefined;
+    } });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    const [first, second] = await Promise.all([
+      fixture.adapter.readTree(repository, firstTree),
+      fixture.adapter.readTree(repository, secondTree),
+    ]);
+    expect(first).toHaveLength(entries.length);
+    expect(second).toHaveLength(entries.length);
+  });
+
+  it.each([
+    { label: "missing", value: undefined },
+    { label: "non-string", value: 7 },
+    { label: "empty", value: "" },
+  ])("rejects a $label commit message as an unavailable GitHub response", async ({ value }) => {
+    const sha = "a".repeat(40);
+    const treeSha = "b".repeat(40);
+    const commit = {
+      tree: { sha: treeSha },
+      parents: [],
+      ...(value === undefined ? {} : { message: value }),
+    };
+    const fixture = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith(`/git/commits/${sha}`)
+      ? json({ sha, commit })
+      : undefined });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.readCommit(repository, sha)).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+  });
+
   it("validates blob object identity and sends canonical base64 for blob creation", async () => {
     const bytes = utf8("hello from GitHub\n");
     const sha = await gitBlobSha(bytes);

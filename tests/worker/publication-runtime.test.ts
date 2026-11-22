@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { PublicationFailure } from "../../src/errors/publication-error.js";
-import { RealGitHubAdapter } from "../../src/github/RealGitHubAdapter.js";
 import { createProductionPublicationService, isProductionPublishingConfigured } from "../../src/publication/runtime.js";
 import { generateTestGitHubAppKeys } from "./github-test-utils.js";
 
@@ -39,7 +38,7 @@ describe("production publication configuration", () => {
     }
   });
 
-  it("builds the real adapter only from valid, exact allowlist configuration", async () => {
+  it("builds a production service without exposing its adapter or policy", async () => {
     const { credentials } = await generateTestGitHubAppKeys();
     const service = await createProductionPublicationService({
       PUBLISHING_ENABLED: "true",
@@ -48,7 +47,8 @@ describe("production publication configuration", () => {
       GITHUB_REPOSITORY_ALLOWLIST: repositoryPolicy,
     });
 
-    expect(service.adapter).toBeInstanceOf(RealGitHubAdapter);
+    expect("adapter" in service).toBe(false);
+    expect("policy" in service).toBe(false);
     expect(await isProductionPublishingConfigured({
       PUBLISHING_ENABLED: "true",
       GITHUB_APP_ID: credentials.appId,

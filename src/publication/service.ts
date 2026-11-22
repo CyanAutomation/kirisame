@@ -12,10 +12,13 @@ import { isAttributesPath, rejectLfsGovernedChanges } from "./git-attributes.js"
 const MARKER = "Kirisame-Publication";
 
 export class PublicationService {
-  constructor(
-    readonly adapter: GitHubAdapter,
-    readonly policy: PublicationPolicy,
-  ) {}
+  readonly #adapter: GitHubAdapter;
+  readonly #policy: PublicationPolicy;
+
+  constructor(adapter: GitHubAdapter, policy: PublicationPolicy) {
+    this.#adapter = adapter;
+    this.#policy = policy;
+  }
 
   async publish(request: PublicationRequest): Promise<PublicationResult> {
     const requestValidation = await validateContract("publication-request", request);
@@ -33,10 +36,10 @@ export class PublicationService {
     }
     let confirmedBranch: PublicationResult["branch"];
     try {
-      await this.policy.authorize(request);
-      await this.adapter.resolveRepository(request.repository, request.mode);
+      await this.#policy.authorize(request);
+      await this.#adapter.resolveRepository(request.repository, request.mode);
       const branchRef = `refs/heads/${request.headRef}`;
-      const existingSha = await this.adapter.readRef(request.repository, branchRef);
+      const existingSha = await this.#adapter.readRef(request.repository, branchRef);
       let commit: GitCommit;
       if (existingSha) {
         commit = await this.#verifyBranch(request, existingSha);
@@ -84,10 +87,10 @@ export class PublicationService {
   }
 
   async #createBranch(request: PublicationRequest): Promise<{ commit: GitCommit; reused: boolean }> {
-    const baseRefSha = await this.adapter.readRef(request.repository, request.baseRef);
+    const baseRefSha = await this.#adapter.readRef(request.repository, request.baseRef);
     if (baseRefSha !== request.baseSha) throw new PublicationFailure("BASE_MOVED");
     const baseCommit = await this.#requiredCommit(request, request.baseSha);
-    const baseTree = await this.adapter.readTree(request.repository, baseCommit.treeSha);
+    const baseTree = await this.#adapter.readTree(request.repository, baseCommit.treeSha);
     const expected = await this.#applyArtifact(request, baseTree);
     this.#rejectNoOp(baseTree, expected);
 
@@ -100,14 +103,14 @@ export class PublicationService {
       const bytes = canonicalBase64ToBytes(file.content.data);
       if (!bytes) throw new PublicationFailure("ARTIFACT_INVALID");
       const expectedSha = await gitBlobSha(bytes);
-      const createdSha = await this.adapter.createBlob(request.repository, bytes);
+      const createdSha = await this.#adapter.createBlob(request.repository, bytes);
       if (createdSha !== expectedSha) throw new PublicationFailure("INTERNAL_ERROR");
       updates.push({ path: file.path, mode: "100644", type: "blob", sha: createdSha });
     }
 
-    const treeSha = await this.adapter.createTree(request.repository, baseCommit.treeSha, updates);
+    const treeSha = await this.#adapter.createTree(request.repository, baseCommit.treeSha, updates);
     const marker = await this.#publicationMarker(request);
-    const commit = await this.adapter.createCommit(request.repository, {
+    const commit = await this.#adapter.createCommit(request.repository, {
       treeSha,
       parentSha: request.baseSha,
       message: `${request.title ?? "Kirisame branch publication"}\n\n${marker}`,
@@ -115,13 +118,13 @@ export class PublicationService {
     await this.#compareExpectedTree(request, commit.treeSha, expected);
 
     try {
-      await this.adapter.createRef(request.repository, request.headRef, commit.sha);
+      await this.#adapter.createRef(request.repository, request.headRef, commit.sha);
     } catch (error) {
-      const headSha = await this.adapter.readRef(request.repository, request.headRef);
+      const headSha = await this.#adapter.readRef(request.repository, request.headRef);
       if (!headSha) throw error;
       return { commit: await this.#verifyBranch(request, headSha), reused: true };
     }
-    const headSha = await this.adapter.readRef(request.repository, request.headRef);
+    const headSha = await this.#adapter.readRef(request.repository, request.headRef);
     if (!headSha) throw new PublicationFailure("RECONCILIATION_REQUIRED");
     return { commit: await this.#verifyBranch(request, headSha), reused: false };
   }
@@ -133,8 +136,8 @@ export class PublicationService {
     }
     const baseCommit = await this.#requiredCommit(request, request.baseSha);
     const [baseTree, headTree] = await Promise.all([
-      this.adapter.readTree(request.repository, baseCommit.treeSha),
-      this.adapter.readTree(request.repository, commit.treeSha),
+      this.#adapter.readTree(request.repository, baseCommit.treeSha),
+      this.#adapter.readTree(request.repository, commit.treeSha),
     ]);
     const expected = await this.#applyArtifact(request, baseTree);
     this.#rejectNoOp(baseTree, expected);
@@ -143,7 +146,7 @@ export class PublicationService {
   }
 
   async #reconcilePullRequest(request: PublicationRequest, branch: NonNullable<PublicationResult["branch"]>): Promise<PublicationResult> {
-    const existing = await this.adapter.listPullRequests(request.repository, request.headRef, request.baseRef);
+    const existing = await this.#adapter.listPullRequests(request.repository, request.headRef, request.baseRef);
     if (existing.length > 1) throw new PublicationFailure("PULL_REQUEST_CONFLICT");
     if (existing.length === 1) {
       await this.#verifyPullRequest(existing[0]!, request);
@@ -151,12 +154,12 @@ export class PublicationService {
     }
 
     // Existing branches without a PR are only completed against the original pinned base.
-    const currentBase = await this.adapter.readRef(request.repository, request.baseRef);
+    const currentBase = await this.#adapter.readRef(request.repository, request.baseRef);
     if (currentBase !== request.baseSha) throw new PublicationFailure("BASE_MOVED");
 
     const body = `${request.body ?? ""}${request.body ? "\n\n" : ""}${await this.#publicationMarker(request)}`;
     try {
-      const pullRequest = await this.adapter.createPullRequest(request.repository, {
+      const pullRequest = await this.#adapter.createPullRequest(request.repository, {
         title: request.title!,
         body,
         headRef: request.headRef,
@@ -166,7 +169,7 @@ export class PublicationService {
       return this.#prSuccess(request, branch, pullRequest);
     } catch (error) {
       const afterMutationFailure = asPublicationFailure(error);
-      const reconciled = await this.adapter.listPullRequests(request.repository, request.headRef, request.baseRef);
+      const reconciled = await this.#adapter.listPullRequests(request.repository, request.headRef, request.baseRef);
       if (reconciled.length === 1) {
         await this.#verifyPullRequest(reconciled[0]!, request);
         return this.#prSuccess(request, { ...branch, reused: true }, reconciled[0]!);
@@ -218,7 +221,7 @@ export class PublicationService {
   }
 
   async #compareExpectedTree(request: PublicationRequest, treeSha: string, expected: GitTreeEntry[]): Promise<void> {
-    const actual = await this.adapter.readTree(request.repository, treeSha);
+    const actual = await this.#adapter.readTree(request.repository, treeSha);
     await this.#compareExpectedEntries(actual, expected);
   }
 
@@ -234,7 +237,7 @@ export class PublicationService {
   }
 
   async #requiredCommit(request: PublicationRequest, sha: string): Promise<GitCommit> {
-    const commit = await this.adapter.readCommit(request.repository, sha);
+    const commit = await this.#adapter.readCommit(request.repository, sha);
     if (!commit) throw new PublicationFailure("GITHUB_UNAVAILABLE");
     return commit;
   }
@@ -246,7 +249,7 @@ export class PublicationService {
   }
 
   async #readVerifiedBlob(request: PublicationRequest, sha: string): Promise<Uint8Array | undefined> {
-    const content = await this.adapter.readBlob(request.repository, sha);
+    const content = await this.#adapter.readBlob(request.repository, sha);
     if (!content) return undefined;
     if (await gitBlobSha(content) !== sha) throw new PublicationFailure("GITHUB_UNAVAILABLE");
     return content;

@@ -62,7 +62,6 @@ export class RealGitHubAdapter implements GitHubAdapter {
   #authorizedRepositoryKey: string | undefined;
   #authorizedOperation: "branch" | "pr" | undefined;
   #identity: RepositoryIdentity | undefined;
-  #treeEntryCount = 0;
 
   constructor(credentials: GitHubAppCredentials, options: RealGitHubAdapterOptions = {}) {
     validateGitHubAppCredentials(credentials);
@@ -138,9 +137,10 @@ export class RealGitHubAdapter implements GitHubAdapter {
     const record = asRecord(result.data);
     const commit = asRecord(record.commit);
     const treeSha = stringAt(asRecord(commit.tree), "sha");
-    const message = stringAt(commit, "message");
+    const message = commit.message;
     const parentsValue = commit.parents;
-    if (record.sha !== sha || !validGitSha(treeSha) || typeof message !== "string" || !Array.isArray(parentsValue)) {
+    if (record.sha !== sha || !validGitSha(treeSha) || typeof message !== "string" || message.length === 0
+      || !Array.isArray(parentsValue)) {
       throw new PublicationFailure("GITHUB_UNAVAILABLE");
     }
     const parentShas = parentsValue.map((parent) => stringAt(asRecord(parent), "sha"));
@@ -155,8 +155,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
 
   async readTree(repository: Repository, treeSha: string): Promise<GitTreeEntry[]> {
     if (!validGitSha(treeSha)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-    this.#treeEntryCount = 0;
-    return this.#readTreeRecursive(repository, treeSha, "", 0);
+    return this.#readTreeRecursive(repository, treeSha, "", 0, { count: 0 });
   }
 
   async readBlob(repository: Repository, sha: string): Promise<Uint8Array | undefined> {
@@ -276,7 +275,13 @@ export class RealGitHubAdapter implements GitHubAdapter {
     return pullRequest;
   }
 
-  async #readTreeRecursive(repository: Repository, treeSha: string, prefix: string, depth: number): Promise<GitTreeEntry[]> {
+  async #readTreeRecursive(
+    repository: Repository,
+    treeSha: string,
+    prefix: string,
+    depth: number,
+    entryCounter: { count: number },
+  ): Promise<GitTreeEntry[]> {
     if (depth > MAX_TREE_DEPTH) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
     const result = await this.#request(`${repoApiPath(repository)}/git/trees/${treeSha}`, {
       token: this.#token(repository), maxBytes: MAX_JSON_RESPONSE_BYTES,
@@ -296,11 +301,11 @@ export class RealGitHubAdapter implements GitHubAdapter {
       if (!name || name.includes("/") || name === "." || name === ".." || !validGitSha(sha)
         || !isValidModeType(mode, type) || names.has(name)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
       names.add(name);
-      this.#treeEntryCount += 1;
-      if (this.#treeEntryCount > MAX_TREE_ENTRIES) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+      entryCounter.count += 1;
+      if (entryCounter.count > MAX_TREE_ENTRIES) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
       const path = prefix ? `${prefix}/${name}` : name;
       output.push({ path, mode, type, sha });
-      if (type === "tree") output.push(...await this.#readTreeRecursive(repository, sha, path, depth + 1));
+      if (type === "tree") output.push(...await this.#readTreeRecursive(repository, sha, path, depth + 1, entryCounter));
     }
     return output;
   }
