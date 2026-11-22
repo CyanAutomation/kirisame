@@ -135,7 +135,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
     });
     if (!result) return undefined;
     const record = asRecord(result.data);
-    const commit = asRecord(record.commit);
+    const commit = record;
     const treeSha = stringAt(asRecord(commit.tree), "sha");
     const message = commit.message;
     const parentsValue = commit.parents;
@@ -227,11 +227,16 @@ export class RealGitHubAdapter implements GitHubAdapter {
   async createRef(repository: Repository, ref: string, sha: string): Promise<void> {
     if (!validGitSha(sha)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
     const branch = normalizeBranchRef(ref);
-    await this.#request(`${repoApiPath(repository)}/git/refs`, {
+    const result = await this.#request(`${repoApiPath(repository)}/git/refs`, {
       method: "POST", token: this.#token(repository),
       body: { ref: `refs/heads/${branch}`, sha },
       conflictCode: "BRANCH_CONFLICT", unprocessableCode: "BRANCH_CONFLICT",
     });
+    const record = asRecord(result.data);
+    const object = asRecord(record.object);
+    if (record.ref !== `refs/heads/${branch}` || object.sha !== sha || object.type !== "commit") {
+      throw new PublicationFailure("GITHUB_UNAVAILABLE");
+    }
   }
 
   async listPullRequests(repository: Repository, headRef: string, baseRef: string): Promise<PullRequestRecord[]> {

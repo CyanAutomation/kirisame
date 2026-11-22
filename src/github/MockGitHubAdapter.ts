@@ -128,6 +128,15 @@ export class MockGitHubAdapter implements GitHubAdapter {
     if (pullRequest) pullRequest.state = stateValue;
   }
 
+  setPullRequestMetadata(repository: Repository, number: number, metadata: { title: string; body: string }): void {
+    const state = this.#repo(repository);
+    const pullRequest = state.pullRequests.find((item) => item.number === number);
+    if (pullRequest) {
+      pullRequest.title = metadata.title;
+      pullRequest.body = metadata.body;
+    }
+  }
+
   async setBaseTreeEntry(repository: Repository, treeSha: string, entry: GitTreeEntry): Promise<string> {
     const state = this.#repo(repository);
     if (!state.trees.has(treeSha)) throw new PublicationFailure("GITHUB_UNAVAILABLE");

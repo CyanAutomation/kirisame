@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import documentedGitCommit from "../fixtures/github-get-commit-response.json";
+import documentedGitTree from "../fixtures/github-get-tree-response.json";
 import { bytesToBase64, utf8 } from "../../src/contracts/integrity.js";
 import { RealGitHubAdapter } from "../../src/github/RealGitHubAdapter.js";
 import { gitBlobSha } from "../../src/github/git-objects.js";
@@ -97,6 +99,109 @@ describe("GitHub App installation token scope", () => {
 });
 
 describe("GitHub REST Git Data adapter", () => {
+  it("parses the documented top-level Git Data commit response", async () => {
+    const fixture = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith(`/git/commits/${documentedGitCommit.sha}`)
+      ? json(documentedGitCommit)
+      : undefined });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.readCommit(repository, documentedGitCommit.sha)).resolves.toEqual({
+      sha: documentedGitCommit.sha,
+      treeSha: documentedGitCommit.tree.sha,
+      parentSha: documentedGitCommit.parents[0]!.sha,
+      message: documentedGitCommit.message,
+    });
+  });
+
+  it("rejects the separate repository Commits API's nested commit shape for a Git Data endpoint", async () => {
+    const sha = "a".repeat(40);
+    const fixture = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith(`/git/commits/${sha}`)
+      ? json({ sha, commit: { tree: { sha: "b".repeat(40) }, parents: [], message: "wrong endpoint shape" } })
+      : undefined });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.readCommit(repository, sha)).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+  });
+
+  it.each([
+    { label: "missing", value: undefined },
+    { label: "non-string", value: 7 },
+    { label: "empty", value: "" },
+  ])("rejects a $label commit message as an unavailable GitHub response", async ({ value }) => {
+    const sha = "a".repeat(40);
+    const response = { sha, tree: { sha: "b".repeat(40) }, parents: [], ...(value === undefined ? {} : { message: value }) };
+    const fixture = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith(`/git/commits/${sha}`) ? json(response) : undefined });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.readCommit(repository, sha)).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+  });
+
+  it.each([
+    { label: "malformed parents", update: { parents: [{ sha: 42 }] } },
+    { label: "invalid tree SHA", update: { tree: { sha: "not-a-sha" } } },
+    { label: "returned SHA mismatch", update: { sha: "c".repeat(40) } },
+  ])("rejects a Git Data commit with $label", async ({ update }) => {
+    const sha = "a".repeat(40);
+    const fixture = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith(`/git/commits/${sha}`)
+      ? json({ ...documentedGitCommit, sha, ...update })
+      : undefined });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.readCommit(repository, sha)).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+  });
+
+  it("rejects a created commit that returns a different tree SHA", async () => {
+    const expectedTreeSha = "b".repeat(40);
+    const fixture = createAdapterFixture({ apiHandler: async (url, init) => url.pathname.endsWith("/git/commits") && init?.method === "POST"
+      ? json({ sha: "a".repeat(40), tree: { sha: "c".repeat(40) }, parents: [{ sha: "d".repeat(40) }], message: "new commit" }, 201)
+      : undefined });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.createCommit(repository, {
+      treeSha: expectedTreeSha,
+      parentSha: "d".repeat(40),
+      message: "new commit",
+    })).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+  });
+
+  it("accepts a realistic documented Git tree response with nested trees", async () => {
+    const nestedTreeSha = "f484d249c660418515fb01c2b9662073663c242e";
+    const fixture = createAdapterFixture({ apiHandler: async (url) => {
+      if (url.pathname.endsWith(`/git/trees/${documentedGitTree.sha}`)) return json(documentedGitTree);
+      if (url.pathname.endsWith(`/git/trees/${nestedTreeSha}`)) return json({ sha: nestedTreeSha, tree: [], truncated: false });
+      return undefined;
+    } });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.readTree(repository, documentedGitTree.sha)).resolves.toEqual([
+      { path: "file.rb", mode: "100644", type: "blob", sha: "44b4fc6d56897b048c772eb4087f854f46256132" },
+      { path: "subdir", mode: "040000", type: "tree", sha: nestedTreeSha },
+      { path: "exec_file", mode: "100755", type: "blob", sha: "45b983be36b73c0788dc9cbcb76cbb80fc7bb057" },
+    ]);
+  });
+
+  it("distinguishes a missing ref from a malformed ref response", async () => {
+    const sha = "a".repeat(40);
+    const missing = createAdapterFixture({ apiHandler: async () => json({ message: "Not Found" }, 404) });
+    await missing.adapter.resolveRepository(repository, "branch");
+    await expect(missing.adapter.readRef(repository, "main")).resolves.toBeUndefined();
+
+    const malformed = createAdapterFixture({ apiHandler: async () => json({ ref: "refs/heads/other", object: { sha } }) });
+    await malformed.adapter.resolveRepository(repository, "branch");
+    await expect(malformed.adapter.readRef(repository, "main")).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+  });
+
+  it("validates the create-ref response and retains create-only conflict behavior", async () => {
+    const sha = "a".repeat(40);
+    const wrongRef = createAdapterFixture({ apiHandler: async () => json({ ref: "refs/heads/other", object: { sha, type: "commit" } }, 201) });
+    await wrongRef.adapter.resolveRepository(repository, "branch");
+    await expect(wrongRef.adapter.createRef(repository, "main", sha)).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+
+    const conflict = createAdapterFixture({ apiHandler: async () => json({ message: "Reference already exists" }, 422) });
+    await conflict.adapter.resolveRepository(repository, "branch");
+    await expect(conflict.adapter.createRef(repository, "main", sha)).rejects.toMatchObject({ code: "BRANCH_CONFLICT" });
+  });
+
   it("normalizes refs once at the API boundary", async () => {
     const fixture = createAdapterFixture({ apiHandler: async (url) => {
       if (url.pathname.endsWith("/git/ref/heads/kirisame/p/019a6000-0000-7000-8000-000000000001")) {
@@ -240,7 +345,7 @@ describe("GitHub REST Git Data adapter", () => {
           parents: [{ sha: baseSha }],
           message: "test commit",
         }, 201);
-        if (url.pathname.endsWith("/git/refs")) return json({ ref: "refs/heads/kirisame/p/x", object: { sha: commitSha } }, 201);
+        if (url.pathname.endsWith("/git/refs")) return json({ ref: "refs/heads/kirisame/p/x", object: { sha: commitSha, type: "commit" } }, 201);
       }
       return undefined;
     } });

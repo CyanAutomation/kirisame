@@ -6,7 +6,7 @@ Kirisame is a standalone, Cloudflare-native service designed to commit validated
 
 It provides a dedicated boundary between systems that **generate code** and systems authorised to **publish code**.
 
-> **Project status:** Phase 0.1, Phase 1.1 publishing hardening, and Phase 2A GitHub App authentication and adapter code are implemented. The public Worker remains diagnostics-only. Its checked-in configuration disables publishing and has an empty repository allowlist; the live GitHub canary, Soyuz binding, and executor migration remain pending.
+> **Project status:** Phase 0.1, Phase 1.1 publishing hardening, Phase 2A GitHub App authentication, and Phase 2A.1 GitHub API compatibility are implemented. A private local canary harness and isolated receiver configuration are prepared, but no live canary has run. The public Worker remains diagnostics-only, publishing is disabled, the allowlist is empty, and no Soyuz binding or executor migration is configured.
 
 ## Overview
 
