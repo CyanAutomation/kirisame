@@ -281,15 +281,13 @@ export class PublicationService {
 
   async #verifyPullRequest(pullRequest: PullRequestRecord, request: PublicationRequest): Promise<void> {
     const marker = await this.#publicationMarker(request);
-    const expectedBody = `${request.body ?? ""}${request.body ? "\n\n" : ""}${marker}`;
     if (pullRequest.headRef !== request.headRef || pullRequest.baseRef !== request.baseRef
       || pullRequest.headRepository.owner.toLowerCase() !== request.repository.owner.toLowerCase()
       || pullRequest.headRepository.name.toLowerCase() !== request.repository.name.toLowerCase()
       || pullRequest.baseRepository.owner.toLowerCase() !== request.repository.owner.toLowerCase()
       || pullRequest.baseRepository.name.toLowerCase() !== request.repository.name.toLowerCase()
-      || pullRequest.title !== request.title
       || !isExpectedPullRequestUrl(pullRequest.url, request.repository, pullRequest.number)
-      || pullRequest.body !== expectedBody
+      || !hasExactPublicationMarker(pullRequest.body, marker)
       || pullRequest.state !== "open") {
       throw new PublicationFailure("PULL_REQUEST_CONFLICT");
     }
@@ -352,4 +350,13 @@ function isExpectedPullRequestUrl(value: string, repository: PublicationRequest[
   } catch {
     return false;
   }
+}
+
+function hasExactPublicationMarker(body: string, marker: string): boolean {
+  const markerIndex = body.indexOf(marker);
+  const markerPrefix = `${MARKER}:`;
+  return markerIndex >= 0
+    && body.indexOf(marker, markerIndex + marker.length) === -1
+    && body.indexOf(markerPrefix) === markerIndex
+    && body.indexOf(markerPrefix, markerIndex + markerPrefix.length) === -1;
 }

@@ -54,6 +54,8 @@ The App ID and Client ID are not secrets. Never print or log the private key, Ap
 
 For an authorized request, Kirisame first applies the repository/mode/base-branch allowlist. It then resolves the App installation for that repository, checks the App ID, repository owner, suspension state, and required permission levels, and requests an installation token scoped to exactly that repository. Branch mode asks for Contents write; PR mode additionally asks for Pull requests write. The response must name exactly that repository, contain no permissions beyond the requested set plus Metadata read, and expire in the future. The adapter retains the token only for that request-local instance.
 
+Git Data API commit objects use the documented top-level response fields (`sha`, `tree`, `parents`, and `message`). The repository Commits API's nested `commit` response shape is not accepted at the Git Data endpoint. Tree reads use the documented `truncated` and tree-entry fields, fetch each subtree separately, and reject truncated results. See [Get a Git commit](https://docs.github.com/en/rest/git/commits#get-a-commit) and [Get a tree](https://docs.github.com/en/rest/git/trees#get-a-tree).
+
 The App JWT uses RS256, sets `iat` 60 seconds in the past, and expires within GitHub's 10-minute maximum. The optional Client ID can be used as the issuer; otherwise the App ID is used. See GitHub's [JWT guidance](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app) and [installation token guidance](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).
 
 Normal CI exercises signing and HTTP behavior using ephemeral keys and mocked GitHub responses. It does not need Cloudflare or GitHub credentials. A successful build or mock test does not prove the live App installation is usable.
@@ -62,14 +64,13 @@ Normal CI exercises signing and HTTP behavior using ephemeral keys and mocked Gi
 
 Do not select a repository automatically. A user or repository owner must explicitly identify a disposable test repository and authorize its use. Do not use production Soyuz to start the test.
 
-1. Confirm the approved repository, its default base branch, and that the Kirisame App is installed only on the approved repository.
-2. Use an isolated canary Worker/environment with a private-only invocation path. Keep the public production Worker's publishing flag false.
-3. Add only the approved repository and required operations/base branch to the canary allowlist. Store the private key as a Worker secret.
-4. Verify installation and permission resolution through the canary's private test harness without printing JWT or token values.
-5. Publish a small text-file change and confirm its branch, commit parent/tree, App author identity, and normal PR head/base/marker.
-6. Replay the identical request and verify that the same branch and PR are returned without duplicate create operations.
-7. Verify an unrelated repository is rejected before token issuance, the public publishing path remains inaccessible, and diagnostics contain no credentials or file contents.
-8. Record the approved repository, branch, commit, PR URL, and sanitized result. Do not merge, close, or delete the test PR automatically.
+1. Confirm the approved disposable repository, its base branch, and that the Kirisame App is installed only on that repository.
+2. Build the separate `kirisame-canary` receiver with `npm run build -- --mode canary-receiver`. It remains disabled with an empty allowlist unless `KIRISAME_CANARY_ENABLED=true`, `KIRISAME_CANARY_REPOSITORY=owner/repo`, and `KIRISAME_CANARY_BASE_REF=branch` are explicitly provided. Its allowlist permits only PR mode to that single repository and base branch. Store the existing App key as a Worker secret only after approval, then deploy that mode only as part of the approved canary procedure.
+3. Use `npm run dev -- --mode canary-harness` for local development. Its `KIRISAME` binding explicitly targets the `PublisherEntrypoint` export on `kirisame-canary`; the local `/__canary/publish-replay` route accepts loopback requests only. It is not an internet publishing route and must not be deployed.
+4. Send one valid v1 PR request to the local harness. The harness validates the repository, base branch and deterministic head, invokes the private entrypoint once, and then sends the exact same JSON again only after the first response confirms an open PR.
+5. Confirm the branch, commit parent/tree, App author identity, PR head/base/marker, and that the replay reports the same branch and PR. The harness does not log request bodies or credentials.
+6. Verify an unrelated repository/base is rejected before any publisher call, the public production publishing route remains inaccessible, and diagnostics contain no credentials or file contents.
+7. Record the approved repository, branch, commit, PR URL, and sanitized result. Do not merge, close, or delete the test PR automatically.
 
 The canary was not run as part of this implementation because no disposable repository or private key was supplied. Do not broaden the allowlist or create credentials to make the test pass.
 

@@ -121,6 +121,64 @@ describe("mock publication application", () => {
     expect(await validateResultAgainstRequest(request, replay)).toEqual([]);
   });
 
+  it("preserves human title and description edits when the exact publication marker remains", async () => {
+    const request = makeRequest("pr");
+    const { adapter, service } = await harness(request);
+    const first = await service.publish(request);
+    const existing = (await adapter.listPullRequests(request.repository, request.headRef, request.baseRef))[0]!;
+    const marker = existing.body.slice(existing.body.indexOf("Kirisame-Publication:"));
+    const humanBody = `Reviewer context added by a maintainer.\n\n${marker}`;
+    adapter.setPullRequestMetadata(request.repository, first.pullRequest!.number, {
+      title: "A clearer title from a maintainer",
+      body: humanBody,
+    });
+
+    const replay = await service.publish(request);
+
+    expect(replay.outcome).toBe("pr_published");
+    expect((await adapter.listPullRequests(request.repository, request.headRef, request.baseRef))[0])
+      .toMatchObject({ title: "A clearer title from a maintainer", body: humanBody });
+  });
+
+  it.each([
+    { label: "missing", edit: (body: string) => body.slice(0, body.indexOf("Kirisame-Publication:")).trimEnd() },
+    { label: "altered", edit: (body: string) => body.replace("Kirisame-Artifact:", "Kirisame-Artifact-Changed:") },
+    { label: "duplicated", edit: (body: string) => `${body}\n\nKirisame-Publication: an unrelated second marker` },
+  ])("rejects a replay when the PR publication marker is $label", async ({ edit }) => {
+    const request = makeRequest("pr");
+    const { adapter, service } = await harness(request);
+    const first = await service.publish(request);
+    const existing = (await adapter.listPullRequests(request.repository, request.headRef, request.baseRef))[0]!;
+    adapter.setPullRequestMetadata(request.repository, first.pullRequest!.number, {
+      title: existing.title,
+      body: edit(existing.body),
+    });
+
+    const replay = await service.publish(request);
+
+    expect(replay.outcome).toBe("blocked");
+    expect(replay.error?.code).toBe("PULL_REQUEST_CONFLICT");
+  });
+
+  it("blocks multiple PRs that match a publication head and base", async () => {
+    const request = makeRequest("pr");
+    const { adapter } = await harness(request);
+    const service = new PublicationService(adapter, new AllowlistedPublicationPolicy([request.repository]));
+    const first = await service.publish(request);
+    expect(first.outcome).toBe("pr_published");
+
+    const originalList = adapter.listPullRequests.bind(adapter);
+    adapter.listPullRequests = async (repository, headRef, baseRef) => {
+      const existing = await originalList(repository, headRef, baseRef);
+      return existing.length ? [...existing, { ...existing[0]!, number: existing[0]!.number + 1 }] : existing;
+    };
+    const replay = await service.publish(request);
+
+    expect(replay.outcome).toBe("blocked");
+    expect(replay.error?.code).toBe("PULL_REQUEST_CONFLICT");
+    expect(adapter.count("createPullRequest")).toBe(1);
+  });
+
   it("recovers a lost branch-create response by reading the deterministic ref", async () => {
     const request = makeRequest("branch");
     const { adapter, service } = await harness(request);
@@ -461,7 +519,12 @@ describe("private and public Worker entrypoints", () => {
     const ready = await workerExports.default.fetch(new Request("https://kirisame.test/readyz"));
 
     expect(root.status).toBe(200);
-    expect(await root.json()).toEqual({ service: "kirisame", implementation: "worker-foundation", publishing: "unavailable" });
+    expect(await root.json()).toMatchObject({
+      service: "kirisame",
+      implementation: "github-app-publisher",
+      publishing: "unavailable",
+      version: { sourceCommit: "unknown", application: "unknown", contract: "unknown", builtAt: "unknown" },
+    });
     expect(health.status).toBe(200);
     expect(ready.status).toBe(503);
     expect(await ready.json()).toEqual({ status: "not_ready", publishing: "unavailable" });

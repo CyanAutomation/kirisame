@@ -14,13 +14,43 @@ export default {
 
     if (url.pathname === "/") {
       const available = await isProductionPublishingConfigured(env);
-      return json({ service: SERVICE, implementation: "worker-foundation", publishing: available ? "available" : "unavailable" }, 200);
+      return json({
+        service: SERVICE,
+        implementation: "github-app-publisher",
+        publishing: available ? "available" : "unavailable",
+        version: deploymentVersion(env),
+      }, 200);
     }
     if (url.pathname === "/health") return json({ status: "ok" }, 200);
     const available = await isProductionPublishingConfigured(env);
     return json({ status: available ? "ready" : "not_ready", publishing: available ? "available" : "unavailable" }, available ? 200 : 503);
   },
 };
+
+function deploymentVersion(environment: unknown): {
+  sourceCommit: string;
+  application: string;
+  contract: string;
+  builtAt: string;
+} {
+  const record = isRecord(environment) ? environment : {};
+  return {
+    sourceCommit: typeof record.KIRISAME_SOURCE_SHA === "string" && /^[a-f0-9]{40}$/iu.test(record.KIRISAME_SOURCE_SHA)
+      ? record.KIRISAME_SOURCE_SHA.toLowerCase()
+      : "unknown",
+    application: typeof record.KIRISAME_APP_VERSION === "string" && /^[0-9A-Za-z.+-]{1,64}$/u.test(record.KIRISAME_APP_VERSION)
+      ? record.KIRISAME_APP_VERSION
+      : "unknown",
+    contract: record.KIRISAME_CONTRACT_VERSION === "1" ? "1" : "unknown",
+    builtAt: typeof record.KIRISAME_BUILD_TIMESTAMP === "string" && Number.isFinite(Date.parse(record.KIRISAME_BUILD_TIMESTAMP))
+      ? new Date(record.KIRISAME_BUILD_TIMESTAMP).toISOString()
+      : "unknown",
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function json(body: unknown, status: number, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {

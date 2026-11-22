@@ -44,6 +44,19 @@ describe("HTTP-backed GitHub publication", () => {
     expect(backend.calls.filter((call) => call.method === "POST" && call.path.endsWith("/git/refs"))).toHaveLength(1);
   });
 
+  it("reconciles a timeout after PR creation without issuing a duplicate PR", async () => {
+    const request = await makeRequest("pr");
+    const backend = await createHttpGitHubBackend(request.repository, { loseMutationResponse: "/pulls" });
+    const adapter = new RealGitHubAdapter(backend.keys.credentials, { fetch: backend.fetch, now: () => fixedNow });
+    const service = new PublicationService(adapter, new AllowlistedPublicationPolicy([request.repository]));
+
+    const result = await service.publish(request);
+
+    expect(result.outcome).toBe("pr_published");
+    expect(result.pullRequest?.state).toBe("open");
+    expect(backend.calls.filter((call) => call.method === "POST" && call.path.endsWith("/pulls"))).toHaveLength(1);
+  });
+
   it("rejects a repository before making any GitHub request", async () => {
     const request = await makeRequest("branch");
     const backend = await createHttpGitHubBackend(request.repository);
@@ -113,7 +126,7 @@ async function createHttpGitHubBackend(
       if (suffix.startsWith("git/commits/")) {
         const sha = suffix.slice("git/commits/".length);
         const commit = await state.readCommit(repository, sha);
-        return commit ? json({ sha, commit: { tree: { sha: commit.treeSha }, parents: commit.parentSha ? [{ sha: commit.parentSha }] : [], message: commit.message } })
+        return commit ? json({ sha, tree: { sha: commit.treeSha }, parents: commit.parentSha ? [{ sha: commit.parentSha }] : [], message: commit.message })
           : json({ message: "Not found" }, 404);
       }
       if (suffix.startsWith("git/trees/")) {
