@@ -1,4 +1,4 @@
-import { bytesToHex, sha1Hex, utf8 } from "../contracts/integrity.js";
+import { sha1Hex, utf8 } from "../contracts/integrity.js";
 import type { GitTreeEntry } from "./types.js";
 
 export async function gitBlobSha(content: Uint8Array): Promise<string> {
@@ -64,5 +64,3 @@ function hexToBytes(value: string): Uint8Array {
   }
   return bytes;
 }
-
-export { bytesToHex };

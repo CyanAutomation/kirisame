@@ -1,13 +1,18 @@
 import { canonicalBase64ToBytes, sha256Hex, utf8 } from "../contracts/integrity.js";
 import { canonicalizeJson } from "../contracts/canonicalize.js";
 import { validateContract, validateResultAgainstRequest } from "../contracts/validate.js";
-import type { FileChange, PublicationRequest, PublicationResult } from "../contracts/types.js";
+import type { PublicationRequest, PublicationResult, PublicationErrorCode, ValidationIssue } from "../contracts/types.js";
 import { asPublicationFailure, PublicationFailure } from "../errors/publication-error.js";
 import type { GitHubAdapter } from "../github/GitHubAdapter.js";
 import { gitBlobSha } from "../github/git-objects.js";
 import type { GitCommit, GitTreeEntry, GitTreeUpdate, PullRequestRecord } from "../github/types.js";
 import type { PublicationPolicy } from "./policy.js";
-import { isAttributesPath, rejectLfsGovernedChanges } from "./git-attributes.js";
+import {
+  applyArtifactToTree,
+  compareExpectedEntries,
+  compareExpectedTree,
+  rejectNoOp,
+} from "./artifact-tree.js";
 
 const MARKER = "Kirisame-Publication";
 
@@ -22,68 +27,42 @@ export class PublicationService {
 
   async publish(request: PublicationRequest): Promise<PublicationResult> {
     const requestValidation = await validateContract("publication-request", request);
-    if (!requestValidation.valid) {
-      const code = requestValidation.errors.find((item) => item.code === "ARTIFACT_DIGEST_MISMATCH")
-        ? "ARTIFACT_DIGEST_MISMATCH"
-        : requestValidation.errors.find((item) => item.code === "ARTIFACT_PROVENANCE_MISMATCH")
-          ? "ARTIFACT_PROVENANCE_MISMATCH"
-          : requestValidation.errors.some((item) => item.code === "UNSAFE_HEAD_REF")
-            ? "UNAUTHORIZED_CALLER"
-            : requestValidation.errors.some((item) => item.code === "UNSUPPORTED_GIT_ATTRIBUTES_CHANGE")
-              ? "UNSUPPORTED_GIT_OBJECT"
-            : "ARTIFACT_INVALID";
-      throw new PublicationFailure(code);
-    }
+    if (!requestValidation.valid) throw new PublicationFailure(requestFailureCode(requestValidation.errors));
     let confirmedBranch: PublicationResult["branch"];
     try {
-      await this.#policy.authorize(request);
-      await this.#adapter.resolveRepository(request.repository, request.mode);
-      const branchRef = `refs/heads/${request.headRef}`;
-      const existingSha = await this.#adapter.readRef(request.repository, branchRef);
-      let commit: GitCommit;
-      if (existingSha) {
-        commit = await this.#verifyBranch(request, existingSha);
-        confirmedBranch = { ref: request.headRef, commitSha: commit.sha, reused: true };
-      } else {
-        const created = await this.#createBranch(request);
-        commit = created.commit;
-        confirmedBranch = { ref: request.headRef, commitSha: commit.sha, reused: created.reused };
-      }
-
-      if (request.mode === "branch") {
-        return this.#checkedSuccess(request, {
-          contractVersion: "1",
-          publicationId: request.publicationId,
-          runId: request.runId,
-          repository: { ...request.repository },
-          mode: "branch",
-          outcome: "branch_published",
-          retryable: false,
-          reconciliation: "branch_confirmed",
-          branch: confirmedBranch,
-        });
-      }
-      return await this.#reconcilePullRequest(request, confirmedBranch);
+      confirmedBranch = await this.#publishBranch(request);
+      return request.mode === "branch"
+        ? this.#branchSuccess(request, confirmedBranch)
+        : await this.#reconcilePullRequest(request, confirmedBranch);
     } catch (error) {
-      const failure = asPublicationFailure(error);
-      const retryable = failure.classification === "retryable";
-      const result: PublicationResult = {
-        contractVersion: "1",
-        publicationId: request.publicationId,
-        runId: request.runId,
-        repository: { ...request.repository },
-        mode: request.mode,
-        outcome: retryable ? "retryable_failure" : "blocked",
-        retryable,
-        reconciliation: failure.classification === "conflict" ? "conflict" : retryable ? "unknown" : "not_needed",
-        ...(confirmedBranch ? { branch: confirmedBranch } : {}),
-        error: failure.toContractError(),
-      };
-      if (confirmedBranch && request.mode === "pr" && retryable) result.reconciliation = "branch_confirmed";
-      const validation = await validateResultAgainstRequest(request, result);
-      if (validation.length > 0) return this.#internalFailure(request);
-      return result;
+      return failureResult(request, error, confirmedBranch);
     }
+  }
+
+  async #publishBranch(request: PublicationRequest): Promise<NonNullable<PublicationResult["branch"]>> {
+    await this.#policy.authorize(request);
+    await this.#adapter.resolveRepository(request.repository, request.mode);
+    const existingSha = await this.#adapter.readRef(request.repository, `refs/heads/${request.headRef}`);
+    if (existingSha) {
+      const commit = await this.#verifyBranch(request, existingSha);
+      return { ref: request.headRef, commitSha: commit.sha, reused: true };
+    }
+    const created = await this.#createBranch(request);
+    return { ref: request.headRef, commitSha: created.commit.sha, reused: created.reused };
+  }
+
+  #branchSuccess(request: PublicationRequest, branch: NonNullable<PublicationResult["branch"]>): Promise<PublicationResult> {
+    return this.#checkedSuccess(request, {
+      contractVersion: "1",
+      publicationId: request.publicationId,
+      runId: request.runId,
+      repository: { ...request.repository },
+      mode: "branch",
+      outcome: "branch_published",
+      retryable: false,
+      reconciliation: "branch_confirmed",
+      branch,
+    });
   }
 
   async #createBranch(request: PublicationRequest): Promise<{ commit: GitCommit; reused: boolean }> {
@@ -91,9 +70,14 @@ export class PublicationService {
     if (baseRefSha !== request.baseSha) throw new PublicationFailure("BASE_MOVED");
     const baseCommit = await this.#requiredCommit(request, request.baseSha);
     const baseTree = await this.#adapter.readTree(request.repository, baseCommit.treeSha);
-    const expected = await this.#applyArtifact(request, baseTree);
-    this.#rejectNoOp(baseTree, expected);
+    const expected = await applyArtifactToTree(this.#adapter, request, baseTree);
+    rejectNoOp(baseTree, expected);
+    const updates = await this.#branchTreeUpdates(request);
+    const commit = await this.#createBranchCommit(request, baseCommit, updates, expected);
+    return this.#createBranchRef(request, commit);
+  }
 
+  async #branchTreeUpdates(request: PublicationRequest): Promise<GitTreeUpdate[]> {
     const updates: GitTreeUpdate[] = [];
     for (const file of request.artifact.files) {
       if (file.operation === "delete") {
@@ -107,7 +91,15 @@ export class PublicationService {
       if (createdSha !== expectedSha) throw new PublicationFailure("INTERNAL_ERROR");
       updates.push({ path: file.path, mode: "100644", type: "blob", sha: createdSha });
     }
+    return updates;
+  }
 
+  async #createBranchCommit(
+    request: PublicationRequest,
+    baseCommit: GitCommit,
+    updates: GitTreeUpdate[],
+    expected: GitTreeEntry[],
+  ): Promise<GitCommit> {
     const treeSha = await this.#adapter.createTree(request.repository, baseCommit.treeSha, updates);
     const marker = await this.#publicationMarker(request);
     const commit = await this.#adapter.createCommit(request.repository, {
@@ -115,8 +107,11 @@ export class PublicationService {
       parentSha: request.baseSha,
       message: `${request.title ?? "Kirisame branch publication"}\n\n${marker}`,
     });
-    await this.#compareExpectedTree(request, commit.treeSha, expected);
+    await compareExpectedTree(this.#adapter, request, commit.treeSha, expected);
+    return commit;
+  }
 
+  async #createBranchRef(request: PublicationRequest, commit: GitCommit): Promise<{ commit: GitCommit; reused: boolean }> {
     try {
       await this.#adapter.createRef(request.repository, request.headRef, commit.sha);
     } catch (error) {
@@ -139,24 +134,34 @@ export class PublicationService {
       this.#adapter.readTree(request.repository, baseCommit.treeSha),
       this.#adapter.readTree(request.repository, commit.treeSha),
     ]);
-    const expected = await this.#applyArtifact(request, baseTree);
-    this.#rejectNoOp(baseTree, expected);
-    await this.#compareExpectedEntries(headTree, expected);
+    const expected = await applyArtifactToTree(this.#adapter, request, baseTree);
+    rejectNoOp(baseTree, expected);
+    compareExpectedEntries(headTree, expected);
     return commit;
   }
 
   async #reconcilePullRequest(request: PublicationRequest, branch: NonNullable<PublicationResult["branch"]>): Promise<PublicationResult> {
     const existing = await this.#adapter.listPullRequests(request.repository, request.headRef, request.baseRef);
     if (existing.length > 1) throw new PublicationFailure("PULL_REQUEST_CONFLICT");
-    if (existing.length === 1) {
-      await this.#verifyPullRequest(existing[0]!, request);
-      return this.#prSuccess(request, branch, existing[0]!);
-    }
+    if (existing.length === 1) return this.#confirmExistingPullRequest(request, branch, existing[0]!);
+    return this.#createPullRequest(request, branch);
+  }
 
-    // Existing branches without a PR are only completed against the original pinned base.
+  async #confirmExistingPullRequest(
+    request: PublicationRequest,
+    branch: NonNullable<PublicationResult["branch"]>,
+    pullRequest: PullRequestRecord,
+  ): Promise<PublicationResult> {
+    await this.#verifyPullRequest(pullRequest, request);
+    return this.#prSuccess(request, branch, pullRequest);
+  }
+
+  async #createPullRequest(
+    request: PublicationRequest,
+    branch: NonNullable<PublicationResult["branch"]>,
+  ): Promise<PublicationResult> {
     const currentBase = await this.#adapter.readRef(request.repository, request.baseRef);
     if (currentBase !== request.baseSha) throw new PublicationFailure("BASE_MOVED");
-
     const body = `${request.body ?? ""}${request.body ? "\n\n" : ""}${await this.#publicationMarker(request)}`;
     try {
       const pullRequest = await this.#adapter.createPullRequest(request.repository, {
@@ -168,72 +173,29 @@ export class PublicationService {
       await this.#verifyPullRequest(pullRequest, request);
       return this.#prSuccess(request, branch, pullRequest);
     } catch (error) {
-      const afterMutationFailure = asPublicationFailure(error);
-      const reconciled = await this.#adapter.listPullRequests(request.repository, request.headRef, request.baseRef);
-      if (reconciled.length === 1) {
-        await this.#verifyPullRequest(reconciled[0]!, request);
-        return this.#prSuccess(request, { ...branch, reused: true }, reconciled[0]!);
-      }
-      if (reconciled.length > 1) throw new PublicationFailure("PULL_REQUEST_CONFLICT");
-      if (afterMutationFailure.code === "PULL_REQUEST_CONFLICT") throw afterMutationFailure;
-      if (afterMutationFailure.classification === "retryable") throw new PublicationFailure("RECONCILIATION_REQUIRED", {
-        ...(afterMutationFailure.retryAfterSeconds !== undefined ? { retryAfterSeconds: afterMutationFailure.retryAfterSeconds } : {}),
+      return this.#recoverPullRequestCreation(request, branch, error);
+    }
+  }
+
+  async #recoverPullRequestCreation(
+    request: PublicationRequest,
+    branch: NonNullable<PublicationResult["branch"]>,
+    error: unknown,
+  ): Promise<PublicationResult> {
+    const failure = asPublicationFailure(error);
+    const reconciled = await this.#adapter.listPullRequests(request.repository, request.headRef, request.baseRef);
+    if (reconciled.length === 1) {
+      await this.#verifyPullRequest(reconciled[0]!, request);
+      return this.#prSuccess(request, { ...branch, reused: true }, reconciled[0]!);
+    }
+    if (reconciled.length > 1) throw new PublicationFailure("PULL_REQUEST_CONFLICT");
+    if (failure.code === "PULL_REQUEST_CONFLICT") throw failure;
+    if (failure.classification === "retryable") {
+      throw new PublicationFailure("RECONCILIATION_REQUIRED", {
+        ...(failure.retryAfterSeconds !== undefined ? { retryAfterSeconds: failure.retryAfterSeconds } : {}),
       });
-      throw afterMutationFailure;
     }
-  }
-
-  async #applyArtifact(request: PublicationRequest, baseTree: GitTreeEntry[]): Promise<GitTreeEntry[]> {
-    if (request.artifact.files.some((file) => isAttributesPath(file.path))) {
-      throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-    }
-    await rejectLfsGovernedChanges(
-      baseTree,
-      request.artifact.files.map((file) => file.path),
-      (sha) => this.#readVerifiedBlob(request, sha),
-    );
-    const leafEntries = baseTree.filter((entry) => entry.type !== "tree");
-    const expected = new Map(leafEntries.map((entry) => [entry.path, { ...entry }]));
-    for (const change of request.artifact.files) {
-      const exact = baseTree.find((entry) => entry.path === change.path);
-      const ancestors = leafEntries.filter((entry) => change.path.startsWith(`${entry.path}/`));
-      const descendants = leafEntries.filter((entry) => entry.path.startsWith(`${change.path}/`));
-      if (ancestors.length > 0 || descendants.length > 0) throw new PublicationFailure("BASE_TREE_CONFLICT");
-
-      if (change.operation === "add") {
-        if (exact) throw new PublicationFailure(exact.type === "blob" && exact.mode !== "100644" ? "UNSUPPORTED_GIT_OBJECT" : "BASE_TREE_CONFLICT");
-        expected.set(change.path, { path: change.path, mode: "100644", type: "blob", sha: await this.#contentBlobSha(change) });
-        continue;
-      }
-
-      if (!exact) throw new PublicationFailure("BASE_TREE_CONFLICT");
-      if (exact.type === "tree" || exact.mode === "040000") throw new PublicationFailure("BASE_TREE_CONFLICT");
-      if (exact.type !== "blob" || exact.mode !== "100644") throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-      if (exact.sha !== change.baseBlobSha) throw new PublicationFailure("BASE_TREE_CONFLICT");
-      const prior = await this.#readVerifiedBlob(request, exact.sha);
-      if (!prior) throw new PublicationFailure("GITHUB_UNAVAILABLE");
-      this.#rejectUnsupportedPriorContent(prior);
-
-      if (change.operation === "delete") expected.delete(change.path);
-      else expected.set(change.path, { path: change.path, mode: "100644", type: "blob", sha: await this.#contentBlobSha(change) });
-    }
-    return [...expected.values()].sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
-  }
-
-  async #compareExpectedTree(request: PublicationRequest, treeSha: string, expected: GitTreeEntry[]): Promise<void> {
-    const actual = await this.#adapter.readTree(request.repository, treeSha);
-    await this.#compareExpectedEntries(actual, expected);
-  }
-
-  async #compareExpectedEntries(actual: GitTreeEntry[], expected: GitTreeEntry[]): Promise<void> {
-    const normalize = (entries: GitTreeEntry[]) => entries.filter((entry) => entry.type !== "tree")
-      .map((entry) => `${entry.path}\0${entry.mode}\0${entry.type}\0${entry.type === "tree" ? "" : entry.sha}`)
-      .sort();
-    const actualValues = normalize(actual);
-    const expectedValues = normalize(expected);
-    if (actualValues.length !== expectedValues.length || actualValues.some((value, index) => value !== expectedValues[index])) {
-      throw new PublicationFailure("BRANCH_CONFLICT");
-    }
+    throw failure;
   }
 
   async #requiredCommit(request: PublicationRequest, sha: string): Promise<GitCommit> {
@@ -242,53 +204,9 @@ export class PublicationService {
     return commit;
   }
 
-  async #contentBlobSha(change: Exclude<FileChange, { operation: "delete" }>): Promise<string> {
-    const bytes = canonicalBase64ToBytes(change.content.data);
-    if (!bytes) throw new PublicationFailure("ARTIFACT_INVALID");
-    return gitBlobSha(bytes);
-  }
-
-  async #readVerifiedBlob(request: PublicationRequest, sha: string): Promise<Uint8Array | undefined> {
-    const content = await this.#adapter.readBlob(request.repository, sha);
-    if (!content) return undefined;
-    if (await gitBlobSha(content) !== sha) throw new PublicationFailure("GITHUB_UNAVAILABLE");
-    return content;
-  }
-
-  #rejectNoOp(baseTree: GitTreeEntry[], expected: GitTreeEntry[]): void {
-    const fingerprint = (entries: GitTreeEntry[]) => entries
-      .filter((entry) => entry.type !== "tree")
-      .map((entry) => `${entry.path}\0${entry.mode}\0${entry.type}\0${entry.sha}`)
-      .sort();
-    const before = fingerprint(baseTree);
-    const after = fingerprint(expected);
-    if (before.length === after.length && before.every((entry, index) => entry === after[index])) {
-      throw new PublicationFailure("NO_CHANGES");
-    }
-  }
-
-  #rejectUnsupportedPriorContent(bytes: Uint8Array): void {
-    if (new TextDecoder("utf-8", { fatal: false }).decode(bytes).startsWith("version https://git-lfs.github.com/spec/v1\n")) {
-      throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-    }
-    try {
-      const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) throw new TypeError("binary");
-    } catch {
-      throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-    }
-  }
-
   async #verifyPullRequest(pullRequest: PullRequestRecord, request: PublicationRequest): Promise<void> {
     const marker = await this.#publicationMarker(request);
-    if (pullRequest.headRef !== request.headRef || pullRequest.baseRef !== request.baseRef
-      || pullRequest.headRepository.owner.toLowerCase() !== request.repository.owner.toLowerCase()
-      || pullRequest.headRepository.name.toLowerCase() !== request.repository.name.toLowerCase()
-      || pullRequest.baseRepository.owner.toLowerCase() !== request.repository.owner.toLowerCase()
-      || pullRequest.baseRepository.name.toLowerCase() !== request.repository.name.toLowerCase()
-      || !isExpectedPullRequestUrl(pullRequest.url, request.repository, pullRequest.number)
-      || !hasExactPublicationMarker(pullRequest.body, marker)
-      || pullRequest.state !== "open") {
+    if (!isExpectedPullRequest(pullRequest, request, marker)) {
       throw new PublicationFailure("PULL_REQUEST_CONFLICT");
     }
   }
@@ -310,22 +228,8 @@ export class PublicationService {
 
   async #checkedSuccess(request: PublicationRequest, result: PublicationResult): Promise<PublicationResult> {
     const errors = await validateResultAgainstRequest(request, result);
-    if (errors.length > 0) return this.#internalFailure(request);
+    if (errors.length > 0) return internalFailure(request);
     return result;
-  }
-
-  #internalFailure(request: PublicationRequest): PublicationResult {
-    return {
-      contractVersion: "1",
-      publicationId: request.publicationId,
-      runId: request.runId,
-      repository: { ...request.repository },
-      mode: request.mode,
-      outcome: "blocked",
-      retryable: false,
-      reconciliation: "unknown",
-      error: new PublicationFailure("INTERNAL_ERROR").toContractError(),
-    };
   }
 
   async #publicationMarker(request: PublicationRequest): Promise<string> {
@@ -339,6 +243,71 @@ export class PublicationService {
     const title = request.title ?? "Kirisame branch publication";
     return message === `${title}\n\n${await this.#publicationMarker(request)}`;
   }
+}
+
+function isExpectedPullRequest(
+  pullRequest: PullRequestRecord,
+  request: PublicationRequest,
+  marker: string,
+): boolean {
+  return pullRequest.headRef === request.headRef
+    && pullRequest.baseRef === request.baseRef
+    && isExpectedRepository(pullRequest.headRepository, request.repository)
+    && isExpectedRepository(pullRequest.baseRepository, request.repository)
+    && isExpectedPullRequestUrl(pullRequest.url, request.repository, pullRequest.number)
+    && hasExactPublicationMarker(pullRequest.body, marker)
+    && pullRequest.state === "open";
+}
+
+function isExpectedRepository(actual: PublicationRequest["repository"], expected: PublicationRequest["repository"]): boolean {
+  return actual.owner.toLowerCase() === expected.owner.toLowerCase()
+    && actual.name.toLowerCase() === expected.name.toLowerCase();
+}
+
+function requestFailureCode(errors: ValidationIssue[]): PublicationErrorCode {
+  if (errors.some((item) => item.code === "ARTIFACT_DIGEST_MISMATCH")) return "ARTIFACT_DIGEST_MISMATCH";
+  if (errors.some((item) => item.code === "ARTIFACT_PROVENANCE_MISMATCH")) return "ARTIFACT_PROVENANCE_MISMATCH";
+  if (errors.some((item) => item.code === "UNSAFE_HEAD_REF")) return "UNAUTHORIZED_CALLER";
+  if (errors.some((item) => item.code === "UNSUPPORTED_GIT_ATTRIBUTES_CHANGE")) return "UNSUPPORTED_GIT_OBJECT";
+  return "ARTIFACT_INVALID";
+}
+
+async function failureResult(
+  request: PublicationRequest,
+  error: unknown,
+  branch: PublicationResult["branch"],
+): Promise<PublicationResult> {
+  const failure = asPublicationFailure(error);
+  const retryable = failure.classification === "retryable";
+  const result: PublicationResult = {
+    contractVersion: "1",
+    publicationId: request.publicationId,
+    runId: request.runId,
+    repository: { ...request.repository },
+    mode: request.mode,
+    outcome: retryable ? "retryable_failure" : "blocked",
+    retryable,
+    reconciliation: failure.classification === "conflict" ? "conflict" : retryable ? "unknown" : "not_needed",
+    ...(branch ? { branch } : {}),
+    error: failure.toContractError(),
+  };
+  if (branch && request.mode === "pr" && retryable) result.reconciliation = "branch_confirmed";
+  const validation = await validateResultAgainstRequest(request, result);
+  return validation.length > 0 ? internalFailure(request) : result;
+}
+
+function internalFailure(request: PublicationRequest): PublicationResult {
+  return {
+    contractVersion: "1",
+    publicationId: request.publicationId,
+    runId: request.runId,
+    repository: { ...request.repository },
+    mode: request.mode,
+    outcome: "blocked",
+    retryable: false,
+    reconciliation: "unknown",
+    error: new PublicationFailure("INTERNAL_ERROR").toContractError(),
+  };
 }
 
 function isExpectedPullRequestUrl(value: string, repository: PublicationRequest["repository"], number: number): boolean {

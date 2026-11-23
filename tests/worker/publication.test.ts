@@ -190,6 +190,18 @@ describe("mock publication application", () => {
     expect(adapter.count("createRef")).toBe(1);
   });
 
+  it("preserves a ref-creation conflict when reconciliation finds no branch", async () => {
+    const request = makeRequest("branch");
+    const { adapter, service } = await harness(request);
+    adapter.injectFault("createRef", { code: "BRANCH_CONFLICT" });
+
+    const result = await service.publish(request);
+
+    expect(result.outcome).toBe("blocked");
+    expect(result.error?.code).toBe("BRANCH_CONFLICT");
+    expect(await adapter.readRef(request.repository, request.headRef)).toBeUndefined();
+  });
+
   it("recovers a lost PR-create response by listing the existing marked PR", async () => {
     const request = makeRequest("pr");
     const { adapter, service } = await harness(request);
@@ -278,6 +290,22 @@ describe("mock publication application", () => {
     expect(adapter.count("createPullRequest")).toBe(1);
   });
 
+  it("blocks a matching PR returned from another repository", async () => {
+    const request = makeRequest("pr");
+    const { adapter, service } = await harness(request);
+    expect((await service.publish(request)).outcome).toBe("pr_published");
+    const originalList = adapter.listPullRequests.bind(adapter);
+    adapter.listPullRequests = async (...args) => (await originalList(...args)).map((pullRequest) => ({
+      ...pullRequest,
+      headRepository: { owner: "attacker", name: "other" },
+    }));
+
+    const replay = await service.publish(request);
+
+    expect(replay.outcome).toBe("blocked");
+    expect(replay.error?.code).toBe("PULL_REQUEST_CONFLICT");
+  });
+
   it("keeps an uncertain publication retryable when a reconciliation read fails", async () => {
     const request = makeRequest("branch");
     const { adapter, service } = await harness(request);
@@ -301,6 +329,19 @@ describe("mock publication application", () => {
     expect(result.retryable).toBe(true);
     expect(result.branch?.ref).toBe(request.headRef);
     expect(result.error?.retryAfterSeconds).toBe(45);
+  });
+
+  it.each([
+    { label: "truncated trees", operation: "readTree", code: "TREE_TRUNCATED", mode: "branch", expected: "UNSUPPORTED_GIT_OBJECT" },
+    { label: "ref API conflicts", operation: "createRef", code: "API_CONFLICT", mode: "branch", expected: "BRANCH_CONFLICT" },
+    { label: "incomplete PR listings", operation: "listPullRequests", code: "PR_LIST_INCOMPLETE", mode: "pr", expected: "GITHUB_UNAVAILABLE" },
+  ] as const)("maps mock adapter faults for $label", async ({ operation, code, mode, expected }) => {
+    const request = makeRequest(mode);
+    await testPublisher.injectFault(operation, { code });
+
+    const result = await testPublisher.publish(JSON.stringify(request));
+
+    expect("outcome" in result ? result.error?.code : result.code).toBe(expected);
   });
 
   it("uses create-only refs safely for concurrent duplicate calls", async () => {
@@ -587,6 +628,22 @@ describe("private and public Worker entrypoints", () => {
     const response = await testPublisher.publish(JSON.stringify(request));
 
     expect("code" in response && response.code).toBe("INVALID_REQUEST");
+    expect(await testPublisher.operations()).toEqual([]);
+  });
+
+  it("rejects malformed JSON before the trusted test binding calls the adapter", async () => {
+    const response = await testPublisher.publish("{");
+
+    expect("code" in response && response.code).toBe("INVALID_REQUEST");
+    expect(await testPublisher.operations()).toEqual([]);
+  });
+
+  it("maps unsupported contract versions to the version error", async () => {
+    const request = makeRequest("branch");
+    (request as { contractVersion: string }).contractVersion = "2";
+    const response = await testPublisher.publish(JSON.stringify(request));
+
+    expect("code" in response && response.code).toBe("UNSUPPORTED_VERSION");
     expect(await testPublisher.operations()).toEqual([]);
   });
 

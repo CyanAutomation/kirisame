@@ -1,7 +1,7 @@
-import { bytesToBase64, utf8 } from "../contracts/integrity.js";
+import { bytesToBase64, canonicalBase64ToBytes, utf8 } from "../contracts/integrity.js";
 import { PublicationFailure } from "../errors/publication-error.js";
 
-export const KIRISAME_GITHUB_APP_ID = "3345400";
+const KIRISAME_GITHUB_APP_ID = "3345400";
 const MAX_JWT_LIFETIME_SECONDS = 600;
 
 export interface GitHubAppCredentials {
@@ -98,18 +98,6 @@ function concatenate(...parts: Uint8Array[]): Uint8Array {
     offset += part.byteLength;
   }
   return output;
-}
-
-function canonicalBase64ToBytes(value: string): Uint8Array | undefined {
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)) return undefined;
-  try {
-    const binary = atob(value);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    return bytesToBase64(bytes) === value ? bytes : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function base64Url(bytes: Uint8Array): string {

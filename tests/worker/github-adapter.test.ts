@@ -4,12 +4,23 @@ import documentedGitTree from "../fixtures/github-get-tree-response.json";
 import { bytesToBase64, utf8 } from "../../src/contracts/integrity.js";
 import { RealGitHubAdapter } from "../../src/github/RealGitHubAdapter.js";
 import { gitBlobSha } from "../../src/github/git-objects.js";
+import { validateGitObjectPath } from "../../src/github/git-paths.js";
 import type { Repository } from "../../src/contracts/types.js";
 import { generateTestGitHubAppKeys, type TestGitHubAppKeys } from "./github-test-utils.js";
 
 const repository: Repository = { owner: "CyanAutomation", name: "demo-app" };
 const now = 1_800_000_000_000;
 let keys: TestGitHubAppKeys;
+
+describe("Git object path validation", () => {
+  it.each(["", "/absolute", "a\\b", "a//b", "a/./b", "a/../b"])("rejects unsafe path %j", (path) => {
+    expect(() => validateGitObjectPath(path)).toThrow(expect.objectContaining({ code: "UNSUPPORTED_GIT_OBJECT" }));
+  });
+
+  it("allows normalized relative paths", () => {
+    expect(() => validateGitObjectPath("docs/guide.md")).not.toThrow();
+  });
+});
 
 beforeAll(async () => {
   keys = await generateTestGitHubAppKeys();
@@ -253,6 +264,17 @@ describe("GitHub REST Git Data adapter", () => {
     }) });
     await invalidMode.adapter.resolveRepository(repository, "branch");
     await expect(invalidMode.adapter.readTree(repository, root)).rejects.toMatchObject({ code: "UNSUPPORTED_GIT_OBJECT" });
+
+    const duplicateName = createAdapterFixture({ apiHandler: async () => json({
+      sha: root,
+      truncated: false,
+      tree: [
+        { path: "README.md", mode: "100644", type: "blob", sha: blob },
+        { path: "README.md", mode: "100644", type: "blob", sha: blob },
+      ],
+    }) });
+    await duplicateName.adapter.resolveRepository(repository, "branch");
+    await expect(duplicateName.adapter.readTree(repository, root)).rejects.toMatchObject({ code: "UNSUPPORTED_GIT_OBJECT" });
   });
 
   it("keeps concurrent tree entry limits isolated per traversal", async () => {
@@ -461,41 +483,58 @@ function createAdapterFixture(options: {
   requestTimeoutMs?: number;
 } = {}) {
   const calls: Array<{ url: URL; init: RequestInit | undefined; headers: Headers; body?: string }> = [];
-  const fetcher: typeof fetch = async (input, init) => {
-    const url = new URL(input instanceof Request ? input.url : String(input));
-    const body = typeof init?.body === "string" ? init.body : undefined;
-    const headers = new Headers(init?.headers);
-    calls.push({ url, init, headers, ...(body !== undefined ? { body } : {}) });
-    if (url.pathname === "/repos/CyanAutomation/demo-app/installation") {
-      return json({
-        id: 42,
-        app_id: options.installationAppId ?? 3345400,
-        account: { login: "CyanAutomation" },
-        suspended_at: options.suspendedAt ?? null,
-        permissions: options.installationPermissions ?? { metadata: "read", contents: "write", pull_requests: "write" },
-      }, options.installationStatus ?? 200);
-    }
-    if (url.pathname === "/app/installations/42/access_tokens") {
-      const request = body ? JSON.parse(body) as { permissions: Record<string, string> } : { permissions: {} };
-      return json({
-        token: "opaque-installation-token",
-        expires_at: options.tokenExpiresAt ?? new Date(now + 3_600_000).toISOString(),
-        permissions: options.tokenPermissions ?? { metadata: "read", ...request.permissions },
-        repositories: options.tokenRepositories ?? [{ id: 77, full_name: "CyanAutomation/demo-app" }],
-      }, 201);
-    }
-    if (url.pathname === "/repos/CyanAutomation/demo-app") {
-      return json({ id: 77, full_name: "CyanAutomation/demo-app" });
-    }
-    const response = await options.apiHandler?.(url, init);
-    return response ?? json({ message: "Not found" }, 404);
-  };
+  const fetcher = createFixtureFetcher(calls, options);
   const adapter = new RealGitHubAdapter(keys.credentials, {
     fetch: fetcher,
     now: () => now,
     ...(options.requestTimeoutMs !== undefined ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
   });
   return { adapter, calls };
+}
+
+function createFixtureFetcher(
+  calls: Array<{ url: URL; init: RequestInit | undefined; headers: Headers; body?: string }>,
+  options: NonNullable<Parameters<typeof createAdapterFixture>[0]>,
+): typeof fetch {
+  return async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    const body = typeof init?.body === "string" ? init.body : undefined;
+    const headers = new Headers(init?.headers);
+    calls.push({ url, init, headers, ...(body !== undefined ? { body } : {}) });
+    const metadata = fixtureMetadataResponse(url, body, options);
+    if (metadata) return metadata;
+    const response = await options.apiHandler?.(url, init);
+    return response ?? json({ message: "Not found" }, 404);
+  };
+}
+
+function fixtureMetadataResponse(
+  url: URL,
+  body: string | undefined,
+  options: NonNullable<Parameters<typeof createAdapterFixture>[0]>,
+): Response | undefined {
+  if (url.pathname === "/repos/CyanAutomation/demo-app/installation") {
+    return json({
+      id: 42,
+      app_id: options.installationAppId ?? 3345400,
+      account: { login: "CyanAutomation" },
+      suspended_at: options.suspendedAt ?? null,
+      permissions: options.installationPermissions ?? { metadata: "read", contents: "write", pull_requests: "write" },
+    }, options.installationStatus ?? 200);
+  }
+  if (url.pathname === "/app/installations/42/access_tokens") {
+    const request = body ? JSON.parse(body) as { permissions: Record<string, string> } : { permissions: {} };
+    return json({
+      token: "opaque-installation-token",
+      expires_at: options.tokenExpiresAt ?? new Date(now + 3_600_000).toISOString(),
+      permissions: options.tokenPermissions ?? { metadata: "read", ...request.permissions },
+      repositories: options.tokenRepositories ?? [{ id: 77, full_name: "CyanAutomation/demo-app" }],
+    }, 201);
+  }
+  if (url.pathname === "/repos/CyanAutomation/demo-app") {
+    return json({ id: 77, full_name: "CyanAutomation/demo-app" });
+  }
+  return undefined;
 }
 
 function json(value: unknown, status = 200, headers: Record<string, string> = {}): Response {

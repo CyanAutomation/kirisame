@@ -42,6 +42,15 @@ const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 const unsafeUnicode = /[\p{Cc}\p{Cf}\p{Cs}\p{Cn}]/u;
 const windowsDeviceName = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+const eventRules: Record<PublicationEvent["type"], { source: PublicationEvent["source"][]; state: PublicationEvent["state"][] }> = {
+  "publication.requested": { source: ["soyuz"], state: ["pending"] },
+  "publication.started": { source: ["kirisame"], state: ["publishing"] },
+  "publication.branch_published": { source: ["kirisame"], state: ["publishing", "published"] },
+  "publication.pull_request_created": { source: ["kirisame"], state: ["published"] },
+  "publication.retryable_failure": { source: ["kirisame"], state: ["retryable_failure"] },
+  "publication.blocked": { source: ["kirisame"], state: ["blocked"] },
+  "publication.reconciled": { source: ["kirisame"], state: ["published", "retryable_failure", "blocked"] },
+};
 
 function issue(code: string, message: string): ValidationIssue {
   return { source: "semantic", code, message };
@@ -65,80 +74,118 @@ function unsafePath(path: string): boolean {
     || utf8(path).byteLength > 1024;
 }
 
+type ArtifactFile = PublicationArtifact["files"][number];
+
+interface ArtifactFileResult {
+  errors: ValidationIssue[];
+  foldedPath: string;
+  bytes: number;
+}
+
 async function artifactErrors(value: unknown): Promise<ValidationIssue[]> {
   if (!isRecord(value) || !Array.isArray(value.files)) return [];
   const artifact = value as unknown as PublicationArtifact;
   const errors: ValidationIssue[] = [];
-  const files = artifact.files;
-  if (artifact.fileCount !== files.length) errors.push(issue("FILE_COUNT_MISMATCH", "fileCount must equal files.length"));
+  if (artifact.fileCount !== artifact.files.length) errors.push(issue("FILE_COUNT_MISMATCH", "fileCount must equal files.length"));
 
   let totalBytes = 0;
-  let decoded: Array<{ path: string; foldedPath: string }> = [];
-  const exactPaths = new Set<string>();
   const foldedPaths = new Set<string>();
-
-  for (const file of files) {
-    const path = file.path;
-    const foldedPath = path.toLowerCase().normalize("NFC");
-    if (unsafePath(path)) errors.push(issue("UNSAFE_PATH", "path must be normalized, bounded, relative POSIX text outside Git metadata"));
-    if (foldedPaths.has(foldedPath)) errors.push(issue("DUPLICATE_OR_CONFLICTING_PATH", "file paths must be unique, including case-folded collisions"));
-    exactPaths.add(path);
-    foldedPaths.add(foldedPath);
-    decoded.push({ path, foldedPath });
-
-    if (foldedPath === ".github/workflows" || foldedPath.startsWith(".github/workflows/")) {
-      errors.push(issue("UNSUPPORTED_WORKFLOW_PATH", "GitHub Actions workflow files are outside the publication contract"));
-    }
-    if (foldedPath === ".gitattributes" || foldedPath.endsWith("/.gitattributes")) {
-      errors.push(issue("UNSUPPORTED_GIT_ATTRIBUTES_CHANGE", "Changes to .gitattributes are outside the publication contract"));
-    }
-
-    if ("content" in file) {
-      const bytes = canonicalBase64ToBytes(file.content.data);
-      if (!bytes) {
-        errors.push(issue("INVALID_BASE64", "content.data must use canonical padded RFC 4648 base64"));
-        continue;
-      }
-      totalBytes += bytes.byteLength;
-      if (bytes.byteLength !== file.content.byteLength) errors.push(issue("CONTENT_LENGTH_MISMATCH", "content.byteLength must match decoded bytes"));
-      if (bytes.byteLength > MAX_FILE_BYTES) errors.push(issue("FILE_TOO_LARGE", "decoded file content exceeds 1 MiB"));
-      if (await sha256Hex(bytes) !== file.content.sha256) errors.push(issue("CONTENT_DIGEST_MISMATCH", "content.sha256 must match decoded bytes"));
-      try {
-        const text = textDecoder.decode(bytes);
-        if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) throw new TypeError("control byte");
-        if (text.startsWith("version https://git-lfs.github.com/spec/v1\n")) {
-          errors.push(issue("UNSUPPORTED_LFS_POINTER", "Git LFS pointer content is outside the publication contract"));
-        }
-      } catch {
-        errors.push(issue("UNSUPPORTED_FILE_TYPE", "file content must be valid UTF-8 text without binary control bytes"));
-      }
-    }
+  const decoded: Array<{ path: string; foldedPath: string }> = [];
+  for (const file of artifact.files) {
+    const result = await artifactFileErrors(file, foldedPaths);
+    errors.push(...result.errors);
+    totalBytes += result.bytes;
+    decoded.push({ path: file.path, foldedPath: result.foldedPath });
   }
 
+  errors.push(...artifactSizeErrors(artifact, totalBytes));
+  errors.push(...artifactManifestErrors(artifact));
+  errors.push(...artifactPathOrderErrors(artifact.files, decoded, foldedPaths));
+  return errors;
+}
+
+async function artifactFileErrors(file: ArtifactFile, foldedPaths: Set<string>): Promise<ArtifactFileResult> {
+  const errors: ValidationIssue[] = [];
+  const path = file.path;
+  const foldedPath = path.toLowerCase().normalize("NFC");
+  if (unsafePath(path)) errors.push(issue("UNSAFE_PATH", "path must be normalized, bounded, relative POSIX text outside Git metadata"));
+  if (foldedPaths.has(foldedPath)) errors.push(issue("DUPLICATE_OR_CONFLICTING_PATH", "file paths must be unique, including case-folded collisions"));
+  foldedPaths.add(foldedPath);
+  if (foldedPath === ".github/workflows" || foldedPath.startsWith(".github/workflows/")) {
+    errors.push(issue("UNSUPPORTED_WORKFLOW_PATH", "GitHub Actions workflow files are outside the publication contract"));
+  }
+  if (foldedPath === ".gitattributes" || foldedPath.endsWith("/.gitattributes")) {
+    errors.push(issue("UNSUPPORTED_GIT_ATTRIBUTES_CHANGE", "Changes to .gitattributes are outside the publication contract"));
+  }
+
+  const bytes = await artifactContentErrors(file, errors);
+  return { errors, foldedPath, bytes };
+}
+
+async function artifactContentErrors(file: ArtifactFile, errors: ValidationIssue[]): Promise<number> {
+  if (!("content" in file)) return 0;
+  const bytes = canonicalBase64ToBytes(file.content.data);
+  if (!bytes) {
+    errors.push(issue("INVALID_BASE64", "content.data must use canonical padded RFC 4648 base64"));
+    return 0;
+  }
+  if (bytes.byteLength !== file.content.byteLength) errors.push(issue("CONTENT_LENGTH_MISMATCH", "content.byteLength must match decoded bytes"));
+  if (bytes.byteLength > MAX_FILE_BYTES) errors.push(issue("FILE_TOO_LARGE", "decoded file content exceeds 1 MiB"));
+  if (await sha256Hex(bytes) !== file.content.sha256) errors.push(issue("CONTENT_DIGEST_MISMATCH", "content.sha256 must match decoded bytes"));
+  validateTextContent(bytes, errors);
+  return bytes.byteLength;
+}
+
+function validateTextContent(bytes: Uint8Array, errors: ValidationIssue[]): void {
+  try {
+    const text = textDecoder.decode(bytes);
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) throw new TypeError("control byte");
+    if (text.startsWith("version https://git-lfs.github.com/spec/v1\n")) {
+      errors.push(issue("UNSUPPORTED_LFS_POINTER", "Git LFS pointer content is outside the publication contract"));
+    }
+  } catch {
+    errors.push(issue("UNSUPPORTED_FILE_TYPE", "file content must be valid UTF-8 text without binary control bytes"));
+  }
+}
+
+function artifactSizeErrors(artifact: PublicationArtifact, totalBytes: number): ValidationIssue[] {
+  const errors: ValidationIssue[] = [];
   if (artifact.totalBytes !== totalBytes) errors.push(issue("TOTAL_BYTES_MISMATCH", "totalBytes must equal the decoded content byte total"));
   if (totalBytes > MAX_TOTAL_BYTES) errors.push(issue("ARTIFACT_TOO_LARGE", "decoded artifact bytes exceed 5 MiB"));
+  return errors;
+}
 
+function artifactManifestErrors(artifact: PublicationArtifact): ValidationIssue[] {
   const canonical = canonicalizeJson(artifact);
-  if (canonical === undefined || utf8(canonical).byteLength > MAX_MANIFEST_BYTES) {
-    errors.push(issue("MANIFEST_TOO_LARGE", "canonical manifest exceeds 8 MiB or is not canonicalizable"));
-  }
+  return canonical === undefined || utf8(canonical).byteLength > MAX_MANIFEST_BYTES
+    ? [issue("MANIFEST_TOO_LARGE", "canonical manifest exceeds 8 MiB or is not canonicalizable")]
+    : [];
+}
 
-  decoded = [...decoded].sort((left, right) => compareUtf8(left.path, right.path));
-  if (decoded.some((entry, index) => entry.path !== files[index]?.path)) {
+function artifactPathOrderErrors(
+  files: ArtifactFile[],
+  decoded: Array<{ path: string; foldedPath: string }>,
+  foldedPaths: Set<string>,
+): ValidationIssue[] {
+  const errors: ValidationIssue[] = [];
+  const sorted = [...decoded].sort((left, right) => compareUtf8(left.path, right.path));
+  if (sorted.some((entry, index) => entry.path !== files[index]?.path)) {
     errors.push(issue("FILES_NOT_SORTED", "files must be ordered by unsigned UTF-8 path bytes"));
   }
-
-  for (const { foldedPath } of decoded) {
-    const parts = foldedPath.split("/");
-    for (let index = 1; index < parts.length; index += 1) {
-      if (foldedPaths.has(parts.slice(0, index).join("/"))) {
-        errors.push(issue("DUPLICATE_OR_CONFLICTING_PATH", "a file path cannot also be a parent directory"));
-        break;
-      }
+  for (const { foldedPath } of sorted) {
+    if (hasParentFilePath(foldedPath, foldedPaths)) {
+      errors.push(issue("DUPLICATE_OR_CONFLICTING_PATH", "a file path cannot also be a parent directory"));
     }
   }
-
   return errors;
+}
+
+function hasParentFilePath(foldedPath: string, foldedPaths: Set<string>): boolean {
+  const parts = foldedPath.split("/");
+  for (let index = 1; index < parts.length; index += 1) {
+    if (foldedPaths.has(parts.slice(0, index).join("/"))) return true;
+  }
+  return false;
 }
 
 function publicationErrorErrors(value: PublicationError): ValidationIssue[] {
@@ -153,19 +200,22 @@ function publicationErrorErrors(value: PublicationError): ValidationIssue[] {
 }
 
 function eventErrors(event: PublicationEvent): ValidationIssue[] {
-  const allowed: Record<PublicationEvent["type"], { source: PublicationEvent["source"][]; state: PublicationEvent["state"][] }> = {
-    "publication.requested": { source: ["soyuz"], state: ["pending"] },
-    "publication.started": { source: ["kirisame"], state: ["publishing"] },
-    "publication.branch_published": { source: ["kirisame"], state: ["publishing", "published"] },
-    "publication.pull_request_created": { source: ["kirisame"], state: ["published"] },
-    "publication.retryable_failure": { source: ["kirisame"], state: ["retryable_failure"] },
-    "publication.blocked": { source: ["kirisame"], state: ["blocked"] },
-    "publication.reconciled": { source: ["kirisame"], state: ["published", "retryable_failure", "blocked"] },
-  };
-  const rule = allowed[event.type];
+  const transitionErrors = eventTransitionErrors(event);
+  if (transitionErrors.length > 0) return transitionErrors;
+  const payloadErrors = eventPayloadErrors(event);
+  if (payloadErrors.length > 0) return payloadErrors;
+  return eventErrorCodeErrors(event);
+}
+
+function eventTransitionErrors(event: PublicationEvent): ValidationIssue[] {
+  const rule = eventRules[event.type];
   if (!rule.source.includes(event.source) || !rule.state.includes(event.state)) {
     return [issue("INVALID_EVENT_TRANSITION", "event source and state must match its lifecycle type")];
   }
+  return [];
+}
+
+function eventPayloadErrors(event: PublicationEvent): ValidationIssue[] {
   if (event.type === "publication.branch_published" && (!event.repository || !event.branchRef || !event.commitSha)) {
     return [issue("INVALID_EVENT_PAYLOAD", "branch publication events require repository, branchRef and commitSha")];
   }
@@ -175,6 +225,10 @@ function eventErrors(event: PublicationEvent): ValidationIssue[] {
   if ((event.type === "publication.retryable_failure" || event.type === "publication.blocked") && !event.errorCode) {
     return [issue("INVALID_EVENT_PAYLOAD", "failure events require an errorCode")];
   }
+  return [];
+}
+
+function eventErrorCodeErrors(event: PublicationEvent): ValidationIssue[] {
   if (event.errorCode) {
     const expected = ERROR_CLASSIFICATIONS[event.errorCode as keyof typeof ERROR_CLASSIFICATIONS];
     if (expected === undefined) return [issue("INVALID_EVENT_ERROR_CODE", "event errorCode is not part of the supported taxonomy")];
@@ -187,45 +241,74 @@ function eventErrors(event: PublicationEvent): ValidationIssue[] {
 
 export async function semanticErrors(type: ContractType, document: unknown): Promise<ValidationIssue[]> {
   if (!isRecord(document)) return [];
-  if (type === "publication-artifact") return artifactErrors(document);
-
-  if (type === "publication-request") {
-    const request = document as unknown as PublicationRequest;
-    const errors = await artifactErrors(request.artifact);
-    if (request.artifact.runId !== request.runId
-      || request.artifact.repository.owner !== request.repository.owner
-      || request.artifact.repository.name !== request.repository.name
-      || request.artifact.baseRef !== request.baseRef
-      || request.artifact.baseSha !== request.baseSha) {
-      errors.push(issue("ARTIFACT_PROVENANCE_MISMATCH", "artifact run, repository and base must match the request"));
-    }
-    const canonical = canonicalizeJson(request.artifact);
-    if (canonical === undefined || `sha256:${await sha256Hex(utf8(canonical))}` !== request.artifactDigest) {
-      errors.push(issue("ARTIFACT_DIGEST_MISMATCH", "artifactDigest must be SHA-256 of the RFC 8785 canonical artifact JSON"));
-    }
-    if (request.headRef !== `kirisame/p/${request.publicationId}`) {
-      errors.push(issue("UNSAFE_HEAD_REF", "headRef must be the deterministic Kirisame publication ref"));
-    }
-    return errors;
+  switch (type) {
+    case "publication-artifact":
+      return artifactErrors(document);
+    case "publication-request":
+      return requestErrors(document as unknown as PublicationRequest);
+    case "publication-error":
+      return publicationErrorErrors(document as unknown as PublicationError);
+    case "publication-event":
+      return eventErrors(document as unknown as PublicationEvent);
+    case "publication-result":
+      return publicationResultErrors(document as unknown as PublicationResult);
   }
+}
 
-  if (type === "publication-error") return publicationErrorErrors(document as unknown as PublicationError);
-  if (type === "publication-event") return eventErrors(document as unknown as PublicationEvent);
+async function requestErrors(request: PublicationRequest): Promise<ValidationIssue[]> {
+  const errors = await artifactErrors(request.artifact);
+  if (request.artifact.runId !== request.runId
+    || request.artifact.repository.owner !== request.repository.owner
+    || request.artifact.repository.name !== request.repository.name
+    || request.artifact.baseRef !== request.baseRef
+    || request.artifact.baseSha !== request.baseSha) {
+    errors.push(issue("ARTIFACT_PROVENANCE_MISMATCH", "artifact run, repository and base must match the request"));
+  }
+  const canonical = canonicalizeJson(request.artifact);
+  if (canonical === undefined || `sha256:${await sha256Hex(utf8(canonical))}` !== request.artifactDigest) {
+    errors.push(issue("ARTIFACT_DIGEST_MISMATCH", "artifactDigest must be SHA-256 of the RFC 8785 canonical artifact JSON"));
+  }
+  if (request.headRef !== `kirisame/p/${request.publicationId}`) {
+    errors.push(issue("UNSAFE_HEAD_REF", "headRef must be the deterministic Kirisame publication ref"));
+  }
+  return errors;
+}
 
-  const result = document as unknown as PublicationResult;
+function publicationResultErrors(result: PublicationResult): ValidationIssue[] {
   const errors: ValidationIssue[] = [];
   if (result.error) errors.push(...publicationErrorErrors(result.error));
-  if (result.outcome === "branch_published"
-    && (result.mode !== "branch" || !result.branch || result.pullRequest || result.error || result.retryable)) {
-    errors.push(issue("MALFORMED_RESULT", "branch_published requires branch mode and a confirmed branch only"));
+  errors.push(...publicationOutcomeErrors(result));
+  errors.push(...publicationFailureErrors(result));
+  if (result.pullRequest && result.mode !== "pr") errors.push(issue("MALFORMED_RESULT", "branch mode cannot return a pull request"));
+  return errors;
+}
+
+function publicationOutcomeErrors(result: PublicationResult): ValidationIssue[] {
+  switch (result.outcome) {
+    case "branch_published":
+      return branchPublicationOutcomeErrors(result);
+    case "pr_published":
+      return pullRequestPublicationOutcomeErrors(result);
+    case "retryable_failure":
+    case "blocked":
+      return result.error ? [] : [issue("MALFORMED_RESULT", "unsuccessful results require a structured error")];
   }
-  if (result.outcome === "pr_published"
-    && (result.mode !== "pr" || !result.branch || !result.pullRequest || result.pullRequest.state !== "open" || result.error || result.retryable)) {
-    errors.push(issue("MALFORMED_RESULT", "pr_published requires PR mode, a branch and an open pull request"));
-  }
-  if ((result.outcome === "retryable_failure" || result.outcome === "blocked") && !result.error) {
-    errors.push(issue("MALFORMED_RESULT", "unsuccessful results require a structured error"));
-  }
+}
+
+function branchPublicationOutcomeErrors(result: PublicationResult): ValidationIssue[] {
+  return result.mode !== "branch" || !result.branch || result.pullRequest || result.error || result.retryable
+    ? [issue("MALFORMED_RESULT", "branch_published requires branch mode and a confirmed branch only")]
+    : [];
+}
+
+function pullRequestPublicationOutcomeErrors(result: PublicationResult): ValidationIssue[] {
+  return result.mode !== "pr" || !result.branch || !result.pullRequest || result.pullRequest.state !== "open" || result.error || result.retryable
+    ? [issue("MALFORMED_RESULT", "pr_published requires PR mode, a branch and an open pull request")]
+    : [];
+}
+
+function publicationFailureErrors(result: PublicationResult): ValidationIssue[] {
+  const errors: ValidationIssue[] = [];
   if (result.error) {
     const retryable = result.error.classification === "retryable";
     if (result.retryable !== retryable || result.outcome !== (retryable ? "retryable_failure" : "blocked")) {
@@ -233,7 +316,6 @@ export async function semanticErrors(type: ContractType, document: unknown): Pro
     }
     if (result.pullRequest) errors.push(issue("MALFORMED_RESULT", "a failed result cannot contain a pull request"));
   }
-  if (result.pullRequest && result.mode !== "pr") errors.push(issue("MALFORMED_RESULT", "branch mode cannot return a pull request"));
   return errors;
 }
 

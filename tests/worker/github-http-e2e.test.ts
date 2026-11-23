@@ -95,98 +95,6 @@ async function createHttpGitHubBackend(
   const calls: Array<{ method: string; path: string }> = [];
   let lostMutationResponse = options.loseMutationResponse;
 
-  const fetch: typeof globalThis.fetch = async (input, init) => {
-    const url = new URL(input instanceof Request ? input.url : String(input));
-    const method = init?.method ?? "GET";
-    const path = url.pathname;
-    calls.push({ method, path });
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
-    if (path === `/repos/${repository.owner}/${repository.name}/installation`) {
-      return json({ id: 42, app_id: 3345400, account: { login: repository.owner }, suspended_at: null,
-        permissions: { metadata: "read", contents: "write", pull_requests: "write" } });
-    }
-    if (path === "/app/installations/42/access_tokens" && method === "POST") {
-      const permissions = body.permissions as Record<string, string>;
-      return json({ token: "test-installation-token", expires_at: new Date(fixedNow + 3_600_000).toISOString(),
-        permissions: { metadata: "read", ...permissions },
-        repositories: [{ id: 77, full_name: `${repository.owner}/${repository.name}` }] }, 201);
-    }
-    if (path === `/repos/${repository.owner}/${repository.name}`) return json({ id: 77, full_name: `${repository.owner}/${repository.name}` });
-    if (!path.startsWith(`/repos/${repository.owner}/${repository.name}/`)) return json({ message: "Not found" }, 404);
-
-    const suffix = path.slice(`/repos/${repository.owner}/${repository.name}/`.length);
-    try {
-      if (suffix.startsWith("git/ref/heads/")) {
-        const ref = suffix.slice("git/ref/heads/".length);
-        if (method === "GET") {
-          const sha = await state.readRef(repository, ref);
-          return sha ? json({ ref: `refs/heads/${ref}`, object: { sha, type: "commit" } }) : json({ message: "Not found" }, 404);
-        }
-      }
-      if (suffix.startsWith("git/commits/")) {
-        const sha = suffix.slice("git/commits/".length);
-        const commit = await state.readCommit(repository, sha);
-        return commit ? json({ sha, tree: { sha: commit.treeSha }, parents: commit.parentSha ? [{ sha: commit.parentSha }] : [], message: commit.message })
-          : json({ message: "Not found" }, 404);
-      }
-      if (suffix.startsWith("git/trees/")) {
-        const sha = suffix.slice("git/trees/".length);
-        const entries = await state.readTree(repository, sha);
-        return json({ sha, truncated: false, tree: entries.filter((entry) => !entry.path.includes("/")) });
-      }
-      if (suffix.startsWith("git/blobs/")) {
-        const sha = suffix.slice("git/blobs/".length);
-        const bytes = await state.readBlob(repository, sha);
-        return bytes ? json({ sha, size: bytes.byteLength, encoding: "base64", content: bytesToBase64(bytes) })
-          : json({ message: "Not found" }, 404);
-      }
-      if (suffix === "git/blobs" && method === "POST") {
-        const content = decodeBase64(String(body.content));
-        const sha = await state.createBlob(repository, content);
-        const response = json({ sha }, 201);
-        return loseAfterMutation(path, response);
-      }
-      if (suffix === "git/trees" && method === "POST") {
-        const updates = body.tree as Array<{ path: string; mode: "100644"; type: "blob"; sha: string | null }>;
-        const sha = await state.createTree(repository, String(body.base_tree), updates);
-        const response = json({ sha }, 201);
-        return loseAfterMutation(path, response);
-      }
-      if (suffix === "git/commits" && method === "POST") {
-        const parents = body.parents as string[];
-        const commit = await state.createCommit(repository, { treeSha: String(body.tree), parentSha: parents[0]!, message: String(body.message) });
-        const response = json({ sha: commit.sha, tree: { sha: commit.treeSha }, parents: [{ sha: commit.parentSha }], message: commit.message }, 201);
-        return loseAfterMutation(path, response);
-      }
-      if (suffix === "git/refs" && method === "POST") {
-        const ref = String(body.ref).replace(/^refs\/heads\//u, "");
-        await state.createRef(repository, ref, String(body.sha));
-        const response = json({ ref: String(body.ref), object: { sha: String(body.sha), type: "commit" } }, 201);
-        return loseAfterMutation(path, response);
-      }
-      if (suffix.startsWith("pulls")) {
-        if (method === "GET") {
-          const head = url.searchParams.get("head")?.split(":").at(-1) ?? "";
-          const base = url.searchParams.get("base") ?? "";
-          const pulls = await state.listPullRequests(repository, head, base);
-          return json(pulls.map(toPullRequestJson));
-        }
-        if (method === "POST") {
-          const pull = await state.createPullRequest(repository, {
-            title: String(body.title), body: String(body.body), headRef: String(body.head), baseRef: String(body.base),
-          });
-          const response = json(toPullRequestJson(pull), 201);
-          return loseAfterMutation(path, response);
-        }
-      }
-      return json({ message: "Not found" }, 404);
-    } catch (error) {
-      const code = (error as { code?: string }).code;
-      const status = code === "BRANCH_CONFLICT" || code === "PULL_REQUEST_CONFLICT" || code === "BASE_TREE_CONFLICT" ? 422 : 500;
-      return json({ message: "Simulated GitHub API error" }, status);
-    }
-  };
-
   function loseAfterMutation(path: string, response: Response): Response {
     if (lostMutationResponse && path.endsWith(lostMutationResponse)) {
       lostMutationResponse = undefined;
@@ -195,7 +103,199 @@ async function createHttpGitHubBackend(
     return response;
   }
 
+  const context = { repository, state, calls, loseAfterMutation };
+  const fetch: typeof globalThis.fetch = (input, init) => handleHttpRequest(input, init, context);
+
   return { keys, calls, fetch };
+}
+
+interface HttpGitHubContext {
+  repository: Repository;
+  state: MockGitHubAdapter;
+  calls: Array<{ method: string; path: string }>;
+  loseAfterMutation(path: string, response: Response): Response;
+}
+
+interface HttpRequestData {
+  url: URL;
+  method: string;
+  path: string;
+  body: Record<string, unknown>;
+}
+
+function readHttpRequest(input: RequestInfo | URL, init: RequestInit | undefined): HttpRequestData {
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  return {
+    url,
+    method: init?.method ?? "GET",
+    path: url.pathname,
+    body: typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {},
+  };
+}
+
+async function handleHttpRequest(input: RequestInfo | URL, init: RequestInit | undefined, context: HttpGitHubContext): Promise<Response> {
+  const request = readHttpRequest(input, init);
+  context.calls.push({ method: request.method, path: request.path });
+  const installationResponse = handleInstallationRequest(request.path, request.method, request.body, context.repository);
+  if (installationResponse) return installationResponse;
+  if (request.path === `/repos/${context.repository.owner}/${context.repository.name}`) {
+    return json({ id: 77, full_name: `${context.repository.owner}/${context.repository.name}` });
+  }
+  return handleRepositoryHttpRequest(request, context);
+}
+
+async function handleRepositoryHttpRequest(request: HttpRequestData, context: HttpGitHubContext): Promise<Response> {
+  const prefix = `/repos/${context.repository.owner}/${context.repository.name}/`;
+  if (!request.path.startsWith(prefix)) return json({ message: "Not found" }, 404);
+  const suffix = request.path.slice(prefix.length);
+  try {
+    const response = await dispatchRepositoryRequest(suffix, request, context);
+    if (!response) return json({ message: "Not found" }, 404);
+    return request.method === "POST" ? context.loseAfterMutation(request.path, response) : response;
+  } catch (error) {
+    return simulatedApiError(error);
+  }
+}
+
+async function dispatchRepositoryRequest(
+  suffix: string,
+  request: HttpRequestData,
+  context: HttpGitHubContext,
+): Promise<Response | undefined> {
+  const { repository, state } = context;
+  const handlers = [
+    () => handleGitRefRequest(suffix, request.method, request.body, repository, state),
+    () => handleCommitRequest(suffix, request.method, request.body, repository, state),
+    () => handleTreeRequest(suffix, request.method, request.body, repository, state),
+    () => handleBlobRequest(suffix, request.method, request.body, repository, state),
+    () => handlePullRequest(suffix, request.method, request.url, request.body, repository, state),
+  ];
+  for (const handler of handlers) {
+    const response = await handler();
+    if (response) return response;
+  }
+  return undefined;
+}
+
+function simulatedApiError(error: unknown): Response {
+  const code = (error as { code?: string }).code;
+  const conflict = code === "BRANCH_CONFLICT" || code === "PULL_REQUEST_CONFLICT" || code === "BASE_TREE_CONFLICT";
+  return json({ message: "Simulated GitHub API error" }, conflict ? 422 : 500);
+}
+
+function handleInstallationRequest(
+  path: string,
+  method: string,
+  body: Record<string, unknown>,
+  repository: Repository,
+): Response | undefined {
+  if (path === `/repos/${repository.owner}/${repository.name}/installation`) {
+    return json({ id: 42, app_id: 3345400, account: { login: repository.owner }, suspended_at: null,
+      permissions: { metadata: "read", contents: "write", pull_requests: "write" } });
+  }
+  if (path !== "/app/installations/42/access_tokens" || method !== "POST") return undefined;
+  const permissions = body.permissions as Record<string, string>;
+  return json({ token: "test-installation-token", expires_at: new Date(fixedNow + 3_600_000).toISOString(),
+    permissions: { metadata: "read", ...permissions },
+    repositories: [{ id: 77, full_name: `${repository.owner}/${repository.name}` }] }, 201);
+}
+
+async function handleGitRefRequest(
+  suffix: string,
+  method: string,
+  body: Record<string, unknown>,
+  repository: Repository,
+  state: MockGitHubAdapter,
+): Promise<Response | undefined> {
+  if (suffix.startsWith("git/ref/heads/") && method === "GET") {
+    const ref = suffix.slice("git/ref/heads/".length);
+    const sha = await state.readRef(repository, ref);
+    return sha ? json({ ref: `refs/heads/${ref}`, object: { sha, type: "commit" } }) : json({ message: "Not found" }, 404);
+  }
+  if (suffix !== "git/refs" || method !== "POST") return undefined;
+  const ref = String(body.ref).replace(/^refs\/heads\//u, "");
+  await state.createRef(repository, ref, String(body.sha));
+  return json({ ref: String(body.ref), object: { sha: String(body.sha), type: "commit" } }, 201);
+}
+
+async function handleCommitRequest(
+  suffix: string,
+  method: string,
+  body: Record<string, unknown>,
+  repository: Repository,
+  state: MockGitHubAdapter,
+): Promise<Response | undefined> {
+  if (suffix.startsWith("git/commits/")) {
+    const sha = suffix.slice("git/commits/".length);
+    const commit = await state.readCommit(repository, sha);
+    return commit ? json({ sha, tree: { sha: commit.treeSha }, parents: commit.parentSha ? [{ sha: commit.parentSha }] : [], message: commit.message })
+      : json({ message: "Not found" }, 404);
+  }
+  if (suffix !== "git/commits" || method !== "POST") return undefined;
+  const parents = body.parents as string[];
+  const commit = await state.createCommit(repository, {
+    treeSha: String(body.tree), parentSha: parents[0]!, message: String(body.message),
+  });
+  return json({ sha: commit.sha, tree: { sha: commit.treeSha }, parents: [{ sha: commit.parentSha }], message: commit.message }, 201);
+}
+
+async function handleTreeRequest(
+  suffix: string,
+  method: string,
+  body: Record<string, unknown>,
+  repository: Repository,
+  state: MockGitHubAdapter,
+): Promise<Response | undefined> {
+  if (suffix.startsWith("git/trees/")) {
+    const sha = suffix.slice("git/trees/".length);
+    const entries = await state.readTree(repository, sha);
+    return json({ sha, truncated: false, tree: entries.filter((entry) => !entry.path.includes("/")) });
+  }
+  if (suffix !== "git/trees" || method !== "POST") return undefined;
+  const updates = body.tree as Array<{ path: string; mode: "100644"; type: "blob"; sha: string | null }>;
+  const sha = await state.createTree(repository, String(body.base_tree), updates);
+  return json({ sha }, 201);
+}
+
+async function handleBlobRequest(
+  suffix: string,
+  method: string,
+  body: Record<string, unknown>,
+  repository: Repository,
+  state: MockGitHubAdapter,
+): Promise<Response | undefined> {
+  if (suffix.startsWith("git/blobs/")) {
+    const sha = suffix.slice("git/blobs/".length);
+    const bytes = await state.readBlob(repository, sha);
+    return bytes ? json({ sha, size: bytes.byteLength, encoding: "base64", content: bytesToBase64(bytes) })
+      : json({ message: "Not found" }, 404);
+  }
+  if (suffix !== "git/blobs" || method !== "POST") return undefined;
+  const content = decodeBase64(String(body.content));
+  const sha = await state.createBlob(repository, content);
+  return json({ sha }, 201);
+}
+
+async function handlePullRequest(
+  suffix: string,
+  method: string,
+  url: URL,
+  body: Record<string, unknown>,
+  repository: Repository,
+  state: MockGitHubAdapter,
+): Promise<Response | undefined> {
+  if (!suffix.startsWith("pulls")) return undefined;
+  if (method === "GET") {
+    const head = url.searchParams.get("head")?.split(":").at(-1) ?? "";
+    const base = url.searchParams.get("base") ?? "";
+    const pulls = await state.listPullRequests(repository, head, base);
+    return json(pulls.map(toPullRequestJson));
+  }
+  if (method !== "POST") return undefined;
+  const pull = await state.createPullRequest(repository, {
+    title: String(body.title), body: String(body.body), headRef: String(body.head), baseRef: String(body.base),
+  });
+  return json(toPullRequestJson(pull), 201);
 }
 
 function toPullRequestJson(pull: PullRequestRecord): Record<string, unknown> {

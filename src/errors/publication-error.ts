@@ -55,7 +55,3 @@ export function asPublicationFailure(error: unknown): PublicationFailure {
   if (error instanceof PublicationFailure) return error;
   return new PublicationFailure("INTERNAL_ERROR");
 }
-
-export function isPublicationFailure(error: unknown): error is PublicationFailure {
-  return error instanceof PublicationFailure;
-}
