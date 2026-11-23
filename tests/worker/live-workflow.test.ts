@@ -83,6 +83,24 @@ describe("deployed live canary workflow", () => {
     expect(publisher.publish).not.toHaveBeenCalled();
   });
 
+  it("reports only a safe preflight failure name for runtime diagnosis", async () => {
+    const failure = new TypeError("private-key-value-must-not-escape");
+    const failingStep = {
+      do: async () => { throw failure; },
+    } as unknown as Parameters<typeof runLiveCanaryPreflight>[1];
+
+    const outcome = await runLiveCanaryPreflight({
+      verifyCanaryAuthorization: async () => ({ status: "verified", repository: "CyanAutomation/somatic" }),
+    }, failingStep);
+
+    expect(outcome).toEqual({
+      status: "uncertain",
+      code: "CANARY_PREFLIGHT_UNCERTAIN",
+      failureName: "TypeError",
+    });
+    expect(JSON.stringify(outcome)).not.toContain(failure.message);
+  });
+
   it("parses JSON-encoded REST API instance parameters as the workflow payload", async () => {
     const preflight = { status: "verified", repository: "CyanAutomation/somatic" } as const;
     const publisher = {
