@@ -54,7 +54,12 @@ export type LiveCanaryOutcome =
   | { status: "completed"; first: PublisherResponse; replay: PublisherResponse | null };
 
 export type LiveCanaryPreflightOutcome = CanaryAuthorizationResult
-  | { status: "uncertain"; code: "CANARY_PREFLIGHT_UNCERTAIN"; failureName: SafeWorkflowFailureName };
+  | {
+    status: "uncertain";
+    code: "CANARY_PREFLIGHT_UNCERTAIN";
+    failureName: SafeWorkflowFailureName;
+    failureStage: SafePreflightFailureStage;
+  };
 
 export type LiveCanaryAllowlistProbeOutcome =
   | { status: "rejected"; code: "CANARY_INVALID_REQUEST" | "CANARY_PROBE_POLICY_DENIED" }
@@ -100,19 +105,24 @@ export async function runLiveCanaryPreflight(
   publisher: Pick<PublisherBinding, "verifyCanaryAuthorization">,
   step: DurableStep,
 ): Promise<LiveCanaryPreflightOutcome> {
+  let publisherBindingInvoked = false;
   try {
-    return await step.do("github-app-installation-and-token-preflight", () =>
-      publisher.verifyCanaryAuthorization());
+    return await step.do("github-app-installation-and-token-preflight", async () => {
+      publisherBindingInvoked = true;
+      return publisher.verifyCanaryAuthorization();
+    });
   } catch (error) {
     return {
       status: "uncertain",
       code: "CANARY_PREFLIGHT_UNCERTAIN",
       failureName: safeWorkflowFailureName(error),
+      failureStage: publisherBindingInvoked ? "publisher-binding" : "workflow-step",
     };
   }
 }
 
 type SafeWorkflowFailureName = "Error" | "TypeError" | "RangeError" | "ReferenceError" | "SyntaxError" | "AggregateError" | "RpcError" | "WorkflowError" | "UnknownError";
+type SafePreflightFailureStage = "workflow-step" | "publisher-binding";
 const SAFE_WORKFLOW_FAILURE_NAMES: ReadonlySet<string> = new Set([
   "Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "AggregateError", "RpcError", "WorkflowError",
 ]);
