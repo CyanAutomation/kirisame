@@ -50,7 +50,7 @@ export type LiveCanaryOutcome =
   | { status: "completed"; first: PublisherResponse; replay: PublisherResponse | null };
 
 export type LiveCanaryPreflightOutcome = CanaryAuthorizationResult
-  | { status: "uncertain"; code: "CANARY_PREFLIGHT_UNCERTAIN" };
+  | { status: "uncertain"; code: "CANARY_PREFLIGHT_UNCERTAIN"; failureName: SafeWorkflowFailureName };
 
 export type LiveCanaryAllowlistProbeOutcome =
   | { status: "rejected"; code: "CANARY_INVALID_REQUEST" | "CANARY_PROBE_POLICY_DENIED" }
@@ -99,9 +99,23 @@ export async function runLiveCanaryPreflight(
   try {
     return await step.do("github-app-installation-and-token-preflight", NO_AUTOMATIC_RETRIES, () =>
       publisher.verifyCanaryAuthorization());
-  } catch {
-    return { status: "uncertain", code: "CANARY_PREFLIGHT_UNCERTAIN" };
+  } catch (error) {
+    return {
+      status: "uncertain",
+      code: "CANARY_PREFLIGHT_UNCERTAIN",
+      failureName: safeWorkflowFailureName(error),
+    };
   }
+}
+
+type SafeWorkflowFailureName = "Error" | "TypeError" | "RangeError" | "ReferenceError" | "SyntaxError" | "AggregateError" | "RpcError" | "WorkflowError" | "UnknownError";
+const SAFE_WORKFLOW_FAILURE_NAMES: ReadonlySet<string> = new Set([
+  "Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "AggregateError", "RpcError", "WorkflowError",
+]);
+
+function safeWorkflowFailureName(error: unknown): SafeWorkflowFailureName {
+  if (!(error instanceof Error) || !SAFE_WORKFLOW_FAILURE_NAMES.has(error.name)) return "UnknownError";
+  return error.name as SafeWorkflowFailureName;
 }
 
 export async function runLiveCanaryAllowlistProbe(
