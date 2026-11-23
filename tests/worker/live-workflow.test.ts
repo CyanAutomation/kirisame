@@ -172,8 +172,13 @@ describe("deployed live canary workflow", () => {
   it("disables automatic retries for both side-effecting publisher calls", async () => {
     const configs: unknown[] = [];
     const step = {
-      do: async <T>(_name: string, config: unknown, callback: () => Promise<T>): Promise<T> => {
-        configs.push(config);
+      do: async <T>(
+        _name: string,
+        configOrCallback: unknown,
+        configuredCallback?: () => Promise<T>,
+      ): Promise<T> => {
+        if (configuredCallback) configs.push(configOrCallback);
+        const callback = configuredCallback ?? configOrCallback as () => Promise<T>;
         return callback();
       },
     };
