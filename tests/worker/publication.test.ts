@@ -2,7 +2,7 @@ import { exports } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import branchFixture from "../contracts/valid/branch-publication-request.json";
 import prFixture from "../contracts/valid/pr-publication-request.json";
-import type { PublicationRequest, PublisherResponse } from "../../src/contracts/types.js";
+import type { CanaryAuthorizationResult, PublicationRequest, PublisherResponse } from "../../src/contracts/types.js";
 import { canonicalizeJson } from "../../src/contracts/canonicalize.js";
 import { bytesToBase64, sha256Hex, utf8 } from "../../src/contracts/integrity.js";
 import { validateResultAgainstRequest } from "../../src/contracts/validate.js";
@@ -10,6 +10,7 @@ import { MockGitHubAdapter } from "../../src/github/MockGitHubAdapter.js";
 import { gitBlobSha } from "../../src/github/git-objects.js";
 import { AllowlistedPublicationPolicy } from "../../src/publication/policy.js";
 import { PublicationService } from "../../src/publication/service.js";
+import { PublisherEntrypoint } from "../../src/entrypoints/publisher.js";
 
 interface TestPublisher {
   publish(requestJson: string): Promise<PublisherResponse>;
@@ -22,7 +23,10 @@ interface TestPublisher {
 
 const workerExports = exports as unknown as {
   default: typeof exports.default;
-  PublisherEntrypoint: { publish(json: string): Promise<PublisherResponse> };
+  PublisherEntrypoint: {
+    publish(json: string): Promise<PublisherResponse>;
+    verifyCanaryAuthorization(): Promise<CanaryAuthorizationResult>;
+  };
   MockPublisherEntrypoint: TestPublisher;
 };
 const testPublisher = workerExports.MockPublisherEntrypoint;
@@ -677,6 +681,26 @@ describe("private and public Worker entrypoints", () => {
     expect(result.error?.code).toBe("PUBLISHING_UNAVAILABLE");
     expect(result.pullRequest).toBeUndefined();
     expect(await validateResultAgainstRequest(request, result)).toEqual([]);
+  });
+
+  it("exposes a read-only fixed-repository preflight while publishing stays disabled", async () => {
+    await expect(workerExports.PublisherEntrypoint.verifyCanaryAuthorization()).resolves.toEqual({
+      status: "rejected",
+      code: "PUBLISHING_UNAVAILABLE",
+    });
+  });
+
+  it("maps preflight failures to a safe result without returning the key", async () => {
+    const secret = "private-key-value-must-not-escape";
+    const publisher = Object.create(PublisherEntrypoint.prototype) as PublisherEntrypoint;
+    Object.defineProperty(publisher, "env", {
+      value: { PUBLISHING_ENABLED: "false", GITHUB_APP_ID: "3345400", GITHUB_APP_PRIVATE_KEY: secret },
+    });
+
+    const result = await publisher.verifyCanaryAuthorization();
+
+    expect(result).toEqual({ status: "rejected", code: "PUBLISHING_UNAVAILABLE" });
+    expect(JSON.stringify(result)).not.toContain(secret);
   });
 
   it("bounds raw RPC payloads before parsing", async () => {

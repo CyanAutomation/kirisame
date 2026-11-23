@@ -139,3 +139,7 @@ export interface ValidationResult {
 }
 
 export type PublisherResponse = PublicationResult | PublicationError;
+
+export type CanaryAuthorizationResult =
+  | { status: "verified"; repository: "CyanAutomation/somatic" }
+  | { status: "rejected"; code: PublicationErrorCode };

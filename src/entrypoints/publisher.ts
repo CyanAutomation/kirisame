@@ -1,9 +1,20 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { validateContract } from "../contracts/validate.js";
-import type { PublicationError, PublicationRequest, PublicationResult, PublisherResponse, ValidationIssue } from "../contracts/types.js";
+import type {
+  CanaryAuthorizationResult,
+  PublicationError,
+  PublicationRequest,
+  PublicationResult,
+  PublisherResponse,
+  ValidationIssue,
+} from "../contracts/types.js";
 import { asPublicationFailure, PublicationFailure } from "../errors/publication-error.js";
 import { PublicationService } from "../publication/service.js";
-import { createProductionPublicationService, type PublisherRuntimeEnvironment } from "../publication/runtime.js";
+import {
+  createProductionPublicationService,
+  verifyCanaryRepositoryAuthorization,
+  type PublisherRuntimeEnvironment,
+} from "../publication/runtime.js";
 import { utf8 } from "../contracts/integrity.js";
 
 export const MAX_REQUEST_BODY_BYTES = 9 * 1024 * 1024;
@@ -11,6 +22,16 @@ type Publish = (request: PublicationRequest) => Promise<PublicationResult>;
 
 /** Private typed-RPC entrypoint. Production publishing is explicitly unavailable in this phase. */
 export class PublisherEntrypoint extends WorkerEntrypoint {
+  // fallow-ignore-next-line unused-class-member -- Invoked by a private Cloudflare Worker Service Binding.
+  async verifyCanaryAuthorization(): Promise<CanaryAuthorizationResult> {
+    try {
+      await verifyCanaryRepositoryAuthorization(this.env as unknown as PublisherRuntimeEnvironment);
+      return { status: "verified", repository: "CyanAutomation/somatic" };
+    } catch (error) {
+      return { status: "rejected", code: asPublicationFailure(error).code };
+    }
+  }
+
   async publish(requestJson: string): Promise<PublisherResponse> {
     const environment = this.env as unknown as PublisherRuntimeEnvironment;
     return handlePublisherJson(requestJson, async (request) => {

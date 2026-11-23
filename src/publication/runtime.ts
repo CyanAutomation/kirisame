@@ -1,6 +1,7 @@
 import { PublicationFailure } from "../errors/publication-error.js";
 import { importGitHubAppPrivateKey, type GitHubAppCredentials, validateGitHubAppCredentials } from "../github/GitHubAppAuth.js";
 import { RealGitHubAdapter } from "../github/RealGitHubAdapter.js";
+import { CANARY_PUBLICATION_TARGET } from "../shared/canary-target.js";
 import { PublicationService } from "./service.js";
 import { parseRepositoryAllowlist } from "./allowlist.js";
 import { RepositoryAllowlistPolicy } from "./policy.js";
@@ -30,6 +31,22 @@ export async function createProductionPublicationService(environment: PublisherR
   const rules = parseRepositoryAllowlist(allowlistJson);
   if (rules.length === 0) throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
   return new PublicationService(new RealGitHubAdapter(credentials), new RepositoryAllowlistPolicy(rules));
+}
+
+/** Read-only fixed-scope App and installation-token preflight; deliberately independent of the publishing gate. */
+export async function verifyCanaryRepositoryAuthorization(
+  environment: PublisherRuntimeEnvironment,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const { appId, clientId, privateKey } = readPublicationSettings(environment);
+  if (!appId || !privateKey) throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
+  const credentials: GitHubAppCredentials = { appId, privateKey, ...(clientId ? { clientId } : {}) };
+  validateGitHubAppCredentials(credentials);
+  await importGitHubAppPrivateKey(privateKey);
+  await new RealGitHubAdapter(credentials, { fetch: fetcher }).resolveRepository(
+    { owner: CANARY_PUBLICATION_TARGET.owner, name: CANARY_PUBLICATION_TARGET.repository },
+    "pr",
+  );
 }
 
 export async function isProductionPublishingConfigured(environment: unknown): Promise<boolean> {

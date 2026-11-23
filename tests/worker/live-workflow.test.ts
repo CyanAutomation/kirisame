@@ -5,8 +5,14 @@ import type { PublicationRequest, PublicationResult, PublisherResponse, Reposito
 import { canonicalizeJson } from "../../src/contracts/canonicalize.js";
 import { bytesToBase64, sha256Hex, utf8 } from "../../src/contracts/integrity.js";
 import { validateContract } from "../../src/contracts/validate.js";
-import liveCanaryWorker, { runLiveCanary } from "../../src/canary/live-workflow.js";
+import liveCanaryWorker, {
+  LiveCanaryWorkflow,
+  runLiveCanary,
+  runLiveCanaryAllowlistProbe,
+  runLiveCanaryPreflight,
+} from "../../src/canary/live-workflow.js";
 import { CANARY_PUBLICATION_TARGET } from "../../src/shared/canary-target.js";
+import { PublicationFailure } from "../../src/errors/publication-error.js";
 
 const TEST_CONTENT = "Kirisame live integration test.\n";
 const TEST_PATH = "kirisame-canary/verification.txt";
@@ -22,6 +28,81 @@ describe("deployed live canary workflow", () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("dispatches deployed Workflow actions through the private publisher binding", async () => {
+    const probeRequest = await makeCanaryRequest({ owner: "cyanautomation", name: "kirisame-policy-probe-never-create" });
+    const denial: PublicationResult = {
+      contractVersion: "1",
+      publicationId: "019a6000-0000-7000-8000-000000000001",
+      runId: "019a6000-0000-7000-8000-000000000002",
+      repository: { owner: "cyanautomation", name: "kirisame-policy-probe-never-create" },
+      mode: "pr",
+      outcome: "blocked",
+      retryable: false,
+      reconciliation: "not_needed",
+      error: new PublicationFailure("REPOSITORY_NOT_ALLOWED").toContractError(),
+    };
+    const publisher = {
+      publish: vi.fn(async (value: string): Promise<PublisherResponse> =>
+        value === probeRequest ? denial : liveResult()),
+      verifyCanaryAuthorization: vi.fn(async () => ({ status: "verified" as const, repository: "CyanAutomation/somatic" as const })),
+    };
+    const workflow = Object.create(LiveCanaryWorkflow.prototype) as LiveCanaryWorkflow;
+    Object.defineProperty(workflow, "env", { value: { KIRISAME: publisher } });
+    const step = directStep as Parameters<LiveCanaryWorkflow["run"]>[1];
+    const invoke = (payload: unknown) => workflow.run({ payload } as Parameters<LiveCanaryWorkflow["run"]>[0], step);
+
+    await expect(invoke({ action: "preflight" })).resolves.toMatchObject({ status: "verified" });
+    await expect(invoke({ action: "allowlist-probe", requestJson: probeRequest })).resolves.toMatchObject({
+      status: "confirmed-denial",
+      response: { error: { code: "REPOSITORY_NOT_ALLOWED" } },
+    });
+    await expect(invoke({ action: "unsupported", requestJson: requestJson } as unknown)).resolves.toEqual({
+      status: "rejected",
+      code: "CANARY_INVALID_REQUEST",
+    });
+    await expect(invoke({ action: "publish", requestJson })).resolves.toMatchObject({
+      status: "completed",
+      first: { outcome: "pr_published" },
+      replay: { outcome: "pr_published" },
+    });
+    expect(publisher.publish).toHaveBeenCalledTimes(3);
+    expect(publisher.verifyCanaryAuthorization).toHaveBeenCalledOnce();
+  });
+
+  it("runs the fixed GitHub App preflight without invoking publication", async () => {
+    const preflight = { status: "verified", repository: "CyanAutomation/somatic" } as const;
+    const publisher = {
+      publish: vi.fn(async (): Promise<PublisherResponse> => liveResult()),
+      verifyCanaryAuthorization: vi.fn(async () => preflight),
+    };
+
+    await expect(runLiveCanaryPreflight(publisher, directStep)).resolves.toEqual(preflight);
+    expect(publisher.verifyCanaryAuthorization).toHaveBeenCalledOnce();
+    expect(publisher.publish).not.toHaveBeenCalled();
+  });
+
+  it("confirms the production allowlist rejects one fixed nonexistent repository", async () => {
+    const request = await makeCanaryRequest({ owner: "cyanautomation", name: "kirisame-policy-probe-never-create" });
+    const denial = {
+      contractVersion: "1" as const,
+      publicationId: "019a6000-0000-7000-8000-000000000001",
+      runId: "019a6000-0000-7000-8000-000000000002",
+      repository: { owner: "CyanAutomation", name: "kirisame-policy-probe-never-create" },
+      mode: "pr" as const,
+      outcome: "blocked" as const,
+      retryable: false,
+      reconciliation: "not_needed" as const,
+      error: new PublicationFailure("REPOSITORY_NOT_ALLOWED").toContractError(),
+    };
+    const publisher = { publish: vi.fn(async () => denial) };
+
+    await expect(runLiveCanaryAllowlistProbe(request, publisher, directStep)).resolves.toMatchObject({
+      status: "confirmed-denial",
+      response: { outcome: "blocked", error: { code: "REPOSITORY_NOT_ALLOWED" } },
+    });
+    expect(publisher.publish).toHaveBeenCalledExactlyOnceWith(request);
   });
 
   it("sends one exact approved Somatic PR request twice and preserves both results", async () => {
