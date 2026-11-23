@@ -77,6 +77,26 @@ describe("GitHub App installation token scope", () => {
       .toThrow(expect.objectContaining({ code: "PUBLISHING_UNAVAILABLE" }));
   });
 
+  it.each([
+    { label: "non-positive installation ID", installationId: 0 },
+    { label: "installation owned by another account", installationLogin: "another-owner" },
+  ])("rejects an installation with a $label before token issuance", async ({ installationId, installationLogin }) => {
+    const fixture = createAdapterFixture(installationId !== undefined
+      ? { installationId }
+      : { installationLogin: installationLogin! });
+
+    await expect(fixture.adapter.resolveRepository(repository, "branch"))
+      .rejects.toMatchObject({ code: "APP_NOT_INSTALLED" });
+    expect(fixture.calls.some((call) => call.url.pathname.endsWith("/access_tokens"))).toBe(false);
+  });
+
+  it("rejects a repository response with a non-positive GitHub ID", async () => {
+    const fixture = createAdapterFixture({ repositoryId: 0 });
+
+    await expect(fixture.adapter.resolveRepository(repository, "branch"))
+      .rejects.toMatchObject({ code: "APP_NOT_INSTALLED" });
+  });
+
   it("rejects an over-scoped token and honors its returned expiration", async () => {
     const broad = createAdapterFixture({ tokenPermissions: { contents: "write", pull_requests: "write", metadata: "read" } });
     await expect(broad.adapter.resolveRepository(repository, "branch"))
@@ -89,6 +109,21 @@ describe("GitHub App installation token scope", () => {
 
   it("rejects a token scoped to the wrong repository", async () => {
     const fixture = createAdapterFixture({ tokenRepositories: [{ id: 88, fullName: "CyanAutomation/other" }] });
+    await expect(fixture.adapter.resolveRepository(repository, "branch"))
+      .rejects.toMatchObject({ code: "GITHUB_AUTH_INVALID" });
+  });
+
+  it.each([
+    { label: "empty", tokenValue: "" },
+    { label: "too close to expiry", tokenExpiresAt: new Date(now + 60_000).toISOString() },
+    { label: "repository with invalid ID", tokenRepositories: [{ id: 0, fullName: "CyanAutomation/demo-app" }] },
+    { label: "multiple repositories", tokenRepositories: [
+      { id: 77, fullName: "CyanAutomation/demo-app" },
+      { id: 88, fullName: "CyanAutomation/other" },
+    ] },
+  ])("rejects a token response with $label", async (options) => {
+    const fixture = createAdapterFixture(options);
+
     await expect(fixture.adapter.resolveRepository(repository, "branch"))
       .rejects.toMatchObject({ code: "GITHUB_AUTH_INVALID" });
   });
@@ -161,6 +196,29 @@ describe("GitHub REST Git Data adapter", () => {
     await expect(fixture.adapter.readCommit(repository, sha)).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
   });
 
+  it("accepts root and merge commits while rejecting malformed parent lists", async () => {
+    const sha = "a".repeat(40);
+    const treeSha = "b".repeat(40);
+    const parentSha = "c".repeat(40);
+    const root = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith(`/git/commits/${sha}`)
+      ? json({ sha, tree: { sha: treeSha }, parents: [], message: "root commit" })
+      : undefined });
+    await root.adapter.resolveRepository(repository, "branch");
+    await expect(root.adapter.readCommit(repository, sha)).resolves.toEqual({ sha, treeSha, message: "root commit" });
+
+    const merge = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith(`/git/commits/${sha}`)
+      ? json({ sha, tree: { sha: treeSha }, parents: [{ sha: parentSha }, { sha: "d".repeat(40) }], message: "merge" })
+      : undefined });
+    await merge.adapter.resolveRepository(repository, "branch");
+    await expect(merge.adapter.readCommit(repository, sha)).resolves.toEqual({ sha, treeSha, message: "merge" });
+
+    const invalid = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith(`/git/commits/${sha}`)
+      ? json({ sha, tree: { sha: treeSha }, parents: [{ sha: "invalid" }], message: "bad parent" })
+      : undefined });
+    await invalid.adapter.resolveRepository(repository, "branch");
+    await expect(invalid.adapter.readCommit(repository, sha)).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+  });
+
   it("rejects a created commit that returns a different tree SHA", async () => {
     const expectedTreeSha = "b".repeat(40);
     const fixture = createAdapterFixture({ apiHandler: async (url, init) => url.pathname.endsWith("/git/commits") && init?.method === "POST"
@@ -173,6 +231,29 @@ describe("GitHub REST Git Data adapter", () => {
       parentSha: "d".repeat(40),
       message: "new commit",
     })).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+  });
+
+  it.each([
+    { label: "invalid SHA", update: { sha: "not-a-sha" } },
+    { label: "message mismatch", update: { message: "different message" } },
+    { label: "multiple parents", update: { parents: [{ sha: "d".repeat(40) }, { sha: "e".repeat(40) }] } },
+    { label: "parent mismatch", update: { parents: [{ sha: "e".repeat(40) }] } },
+  ])("rejects a created commit with $label", async ({ update }) => {
+    const treeSha = "b".repeat(40);
+    const parentSha = "d".repeat(40);
+    const fixture = createAdapterFixture({ apiHandler: async (url, init) => url.pathname.endsWith("/git/commits") && init?.method === "POST"
+      ? json({
+        sha: "a".repeat(40),
+        tree: { sha: treeSha },
+        parents: [{ sha: parentSha }],
+        message: "expected message",
+        ...update,
+      }, 201)
+      : undefined });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.createCommit(repository, { treeSha, parentSha, message: "expected message" }))
+      .rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
   });
 
   it("accepts a realistic documented Git tree response with nested trees", async () => {
@@ -277,6 +358,21 @@ describe("GitHub REST Git Data adapter", () => {
     await expect(duplicateName.adapter.readTree(repository, root)).rejects.toMatchObject({ code: "UNSUPPORTED_GIT_OBJECT" });
   });
 
+  it.each([
+    { label: "missing name", entry: { mode: "100644", type: "blob", sha: "3".repeat(40) } },
+    { label: "nested name in one tree entry", entry: { path: "nested/file.txt", mode: "100644", type: "blob", sha: "3".repeat(40) } },
+    { label: "dot path segment", entry: { path: "..", mode: "100644", type: "blob", sha: "3".repeat(40) } },
+    { label: "invalid object SHA", entry: { path: "file.txt", mode: "100644", type: "blob", sha: "invalid" } },
+  ])("rejects a tree entry with a $label", async ({ entry }) => {
+    const treeSha = "1".repeat(40);
+    const fixture = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith(`/git/trees/${treeSha}`)
+      ? json({ sha: treeSha, truncated: false, tree: [entry] })
+      : undefined });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.readTree(repository, treeSha)).rejects.toMatchObject({ code: "UNSUPPORTED_GIT_OBJECT" });
+  });
+
   it("keeps concurrent tree entry limits isolated per traversal", async () => {
     const firstTree = "1".repeat(40);
     const secondTree = "2".repeat(40);
@@ -349,6 +445,29 @@ describe("GitHub REST Git Data adapter", () => {
     }) : undefined });
     await mismatch.adapter.resolveRepository(repository, "branch");
     await expect(mismatch.adapter.readBlob(repository, sha)).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+  });
+
+  it.each([
+    { label: "unsupported encoding", response: (sha: string) => ({ sha, size: 1, encoding: "utf-8", content: "YQ==" }), code: "UNSUPPORTED_GIT_OBJECT" },
+    { label: "oversized declared content", response: (sha: string) => ({ sha, size: 1_048_577, encoding: "base64", content: "YQ==" }), code: "UNSUPPORTED_GIT_OBJECT" },
+    { label: "invalid base64", response: (sha: string) => ({ sha, size: 1, encoding: "base64", content: "%%%=" }), code: "GITHUB_UNAVAILABLE" },
+    { label: "declared size mismatch", response: (sha: string) => ({ sha, size: 2, encoding: "base64", content: "YQ==" }), code: "GITHUB_UNAVAILABLE" },
+  ])("rejects a blob response with $label", async ({ response, code }) => {
+    const sha = "a".repeat(40);
+    const fixture = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith(`/git/blobs/${sha}`)
+      ? json(response(sha))
+      : undefined });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.readBlob(repository, sha)).rejects.toMatchObject({ code });
+  });
+
+  it("returns undefined when a requested blob is not found", async () => {
+    const sha = "a".repeat(40);
+    const fixture = createAdapterFixture({ apiHandler: async () => json({ message: "Not Found" }, 404) });
+    await fixture.adapter.resolveRepository(repository, "branch");
+
+    await expect(fixture.adapter.readBlob(repository, sha)).resolves.toBeUndefined();
   });
 
   it("sends nested tree updates, a single-parent commit, and create-only refs", async () => {
@@ -431,6 +550,33 @@ describe("GitHub REST Git Data adapter", () => {
     })).rejects.toMatchObject({ code: "PULL_REQUEST_CONFLICT" });
   });
 
+  it("normalizes null PR bodies and merged state", async () => {
+    const fixture = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith("/pulls")
+      ? json({ ...pullRequestJson(10), state: "closed", merged_at: "2026-11-20T10:00:00Z", body: null }, 201)
+      : undefined });
+    await fixture.adapter.resolveRepository(repository, "pr");
+
+    await expect(fixture.adapter.createPullRequest(repository, {
+      title: "Merged PR", body: "", headRef: "kirisame/p/x", baseRef: "main",
+    })).resolves.toMatchObject({ number: 10, state: "merged", body: "" });
+  });
+
+  it.each([
+    { label: "non-canonical URL", update: { html_url: "https://example.com/pull/4" }, code: "GITHUB_UNAVAILABLE" },
+    { label: "unsupported state", update: { state: "queued" }, code: "GITHUB_UNAVAILABLE" },
+    { label: "malformed merge timestamp", update: { merged_at: 42 }, code: "GITHUB_UNAVAILABLE" },
+    { label: "malformed head repository", update: { head: { ref: "kirisame/p/x", repo: { full_name: "invalid" } } }, code: "PULL_REQUEST_CONFLICT" },
+  ])("rejects a pull request response with a $label", async ({ update, code }) => {
+    const fixture = createAdapterFixture({ apiHandler: async (url) => url.pathname.endsWith("/pulls")
+      ? json({ ...pullRequestJson(11), ...update }, 201)
+      : undefined });
+    await fixture.adapter.resolveRepository(repository, "pr");
+
+    await expect(fixture.adapter.createPullRequest(repository, {
+      title: "Malformed PR", body: "", headRef: "kirisame/p/x", baseRef: "main",
+    })).rejects.toMatchObject({ code });
+  });
+
   it("distinguishes permission denials, rate limits, server errors, and timeouts", async () => {
     const permission = createAdapterFixture({ apiHandler: async () => json({ message: "Resource not accessible by integration" }, 403) });
     await permission.adapter.resolveRepository(repository, "branch");
@@ -455,6 +601,21 @@ describe("GitHub REST Git Data adapter", () => {
     await expect(timeout.adapter.readRef(repository, "main")).rejects.toMatchObject({ code: "GITHUB_TIMEOUT" });
   });
 
+  it("maps authentication and Git write-conflict HTTP statuses", async () => {
+    const unauthorized = createAdapterFixture({ apiHandler: async () => json({ message: "bad credentials" }, 401) });
+    await unauthorized.adapter.resolveRepository(repository, "branch");
+    await expect(unauthorized.adapter.readRef(repository, "main")).rejects.toMatchObject({ code: "GITHUB_AUTH_INVALID" });
+
+    const missingBlob = createAdapterFixture({ apiHandler: async () => json({ message: "Not found" }, 404) });
+    await missingBlob.adapter.resolveRepository(repository, "branch");
+    await expect(missingBlob.adapter.createBlob(repository, utf8("x"))).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+
+    const treeConflict = createAdapterFixture({ apiHandler: async () => json({ message: "base conflict" }, 409) });
+    await treeConflict.adapter.resolveRepository(repository, "branch");
+    await expect(treeConflict.adapter.createTree(repository, "a".repeat(40), []))
+      .rejects.toMatchObject({ code: "BASE_TREE_CONFLICT" });
+  });
+
   it("does not follow API redirects and bounds malformed or oversized responses", async () => {
     const redirect = createAdapterFixture({ apiHandler: async () => new Response(null, { status: 302, headers: { location: "https://evil.example" } }) });
     await redirect.adapter.resolveRepository(repository, "branch");
@@ -473,12 +634,16 @@ describe("GitHub REST Git Data adapter", () => {
 
 function createAdapterFixture(options: {
   installationAppId?: number;
+  installationId?: number;
+  installationLogin?: string;
+  repositoryId?: number;
   installationStatus?: number;
   suspendedAt?: string | null;
   installationPermissions?: Record<string, string>;
   tokenPermissions?: Record<string, string>;
+  tokenValue?: string;
   tokenExpiresAt?: string;
-  tokenRepositories?: Array<{ id: number; fullName: string }>;
+  tokenRepositories?: Array<{ id: unknown; fullName: unknown }>;
   apiHandler?: (url: URL, init: RequestInit | undefined) => Promise<Response | undefined>;
   requestTimeoutMs?: number;
 } = {}) {
@@ -508,33 +673,41 @@ function createFixtureFetcher(
   };
 }
 
+type AdapterFixtureOptions = NonNullable<Parameters<typeof createAdapterFixture>[0]>;
+type MetadataResponseFactory = (body: string | undefined, options: AdapterFixtureOptions) => Response;
+const metadataResponseFactories: ReadonlyMap<string, MetadataResponseFactory> = new Map<string, MetadataResponseFactory>([
+  ["/repos/CyanAutomation/demo-app/installation", (_body, options) => json({
+    id: options.installationId ?? 42,
+    app_id: options.installationAppId ?? 3345400,
+    account: { login: options.installationLogin ?? "CyanAutomation" },
+    suspended_at: options.suspendedAt ?? null,
+    permissions: options.installationPermissions ?? { metadata: "read", contents: "write", pull_requests: "write" },
+  }, options.installationStatus ?? 200)],
+  ["/app/installations/42/access_tokens", (body, options) => tokenMetadataResponse(body, options)],
+  ["/repos/CyanAutomation/demo-app", (_body, options) => json({
+    id: options.repositoryId ?? 77,
+    full_name: "CyanAutomation/demo-app",
+  })],
+]);
+
 function fixtureMetadataResponse(
   url: URL,
   body: string | undefined,
-  options: NonNullable<Parameters<typeof createAdapterFixture>[0]>,
+  options: AdapterFixtureOptions,
 ): Response | undefined {
-  if (url.pathname === "/repos/CyanAutomation/demo-app/installation") {
-    return json({
-      id: 42,
-      app_id: options.installationAppId ?? 3345400,
-      account: { login: "CyanAutomation" },
-      suspended_at: options.suspendedAt ?? null,
-      permissions: options.installationPermissions ?? { metadata: "read", contents: "write", pull_requests: "write" },
-    }, options.installationStatus ?? 200);
-  }
-  if (url.pathname === "/app/installations/42/access_tokens") {
-    const request = body ? JSON.parse(body) as { permissions: Record<string, string> } : { permissions: {} };
-    return json({
-      token: "opaque-installation-token",
-      expires_at: options.tokenExpiresAt ?? new Date(now + 3_600_000).toISOString(),
-      permissions: options.tokenPermissions ?? { metadata: "read", ...request.permissions },
-      repositories: options.tokenRepositories ?? [{ id: 77, full_name: "CyanAutomation/demo-app" }],
-    }, 201);
-  }
-  if (url.pathname === "/repos/CyanAutomation/demo-app") {
-    return json({ id: 77, full_name: "CyanAutomation/demo-app" });
-  }
-  return undefined;
+  return metadataResponseFactories.get(url.pathname)?.(body, options);
+}
+
+function tokenMetadataResponse(body: string | undefined, options: AdapterFixtureOptions): Response {
+  const requestedPermissions = body
+    ? (JSON.parse(body) as { permissions: Record<string, string> }).permissions
+    : {};
+  return json({
+    token: options.tokenValue ?? "opaque-installation-token",
+    expires_at: options.tokenExpiresAt ?? new Date(now + 3_600_000).toISOString(),
+    permissions: options.tokenPermissions ?? { metadata: "read", ...requestedPermissions },
+    repositories: options.tokenRepositories ?? [{ id: 77, full_name: "CyanAutomation/demo-app" }],
+  }, 201);
 }
 
 function json(value: unknown, status = 200, headers: Record<string, string> = {}): Response {

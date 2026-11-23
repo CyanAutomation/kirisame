@@ -51,6 +51,19 @@ const eventRules: Record<PublicationEvent["type"], { source: PublicationEvent["s
   "publication.blocked": { source: ["kirisame"], state: ["blocked"] },
   "publication.reconciled": { source: ["kirisame"], state: ["published", "retryable_failure", "blocked"] },
 };
+type EventPayloadField = "repository" | "branchRef" | "commitSha" | "pullRequestNumber" | "errorCode";
+const eventPayloadRequirements: Partial<Record<PublicationEvent["type"], { fields: EventPayloadField[]; message: string }>> = {
+  "publication.branch_published": {
+    fields: ["repository", "branchRef", "commitSha"],
+    message: "branch publication events require repository, branchRef and commitSha",
+  },
+  "publication.pull_request_created": {
+    fields: ["repository", "branchRef", "commitSha", "pullRequestNumber"],
+    message: "pull request events require repository, branchRef, commitSha and pullRequestNumber",
+  },
+  "publication.retryable_failure": { fields: ["errorCode"], message: "failure events require an errorCode" },
+  "publication.blocked": { fields: ["errorCode"], message: "failure events require an errorCode" },
+};
 
 function issue(code: string, message: string): ValidationIssue {
   return { source: "semantic", code, message };
@@ -216,16 +229,9 @@ function eventTransitionErrors(event: PublicationEvent): ValidationIssue[] {
 }
 
 function eventPayloadErrors(event: PublicationEvent): ValidationIssue[] {
-  if (event.type === "publication.branch_published" && (!event.repository || !event.branchRef || !event.commitSha)) {
-    return [issue("INVALID_EVENT_PAYLOAD", "branch publication events require repository, branchRef and commitSha")];
-  }
-  if (event.type === "publication.pull_request_created" && (!event.repository || !event.branchRef || !event.commitSha || !event.pullRequestNumber)) {
-    return [issue("INVALID_EVENT_PAYLOAD", "pull request events require repository, branchRef, commitSha and pullRequestNumber")];
-  }
-  if ((event.type === "publication.retryable_failure" || event.type === "publication.blocked") && !event.errorCode) {
-    return [issue("INVALID_EVENT_PAYLOAD", "failure events require an errorCode")];
-  }
-  return [];
+  const requirement = eventPayloadRequirements[event.type];
+  if (!requirement || requirement.fields.every((field) => event[field])) return [];
+  return [issue("INVALID_EVENT_PAYLOAD", requirement.message)];
 }
 
 function eventErrorCodeErrors(event: PublicationEvent): ValidationIssue[] {

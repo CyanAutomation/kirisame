@@ -41,4 +41,18 @@ describe("public diagnostics", () => {
     expect(health.status).toBe(200);
     expect(await health.json()).toEqual({ status: "ok" });
   });
+
+  it("reports readiness separately from liveness and rejects unknown routes or methods", async () => {
+    const ready = await worker.fetch(new Request("https://kirisame.workers.dev/readyz"));
+    const wrongMethod = await worker.fetch(new Request("https://kirisame.workers.dev/health", { method: "POST" }));
+    const unknown = await worker.fetch(new Request("https://kirisame.workers.dev/missing"));
+    const privateRoute = await worker.fetch(new Request("https://kirisame.workers.dev/internal/v1/publications"));
+
+    expect(ready.status).toBe(503);
+    expect(await ready.json()).toEqual({ status: "not_ready", publishing: "unavailable" });
+    expect(wrongMethod.status).toBe(405);
+    expect(wrongMethod.headers.get("allow")).toBe("GET");
+    expect(unknown.status).toBe(404);
+    expect(privateRoute.status).toBe(404);
+  });
 });

@@ -3,6 +3,29 @@
   "minimumVersion": "3.47.0",
   "entry": ["cloudflare.config.ts"],
   "supportEntry": ["tests/worker/test-entrypoint.ts"],
+  "boundaries": {
+    "zones": [
+      { "name": "contracts", "patterns": ["src/contracts/**"] },
+      { "name": "errors", "patterns": ["src/errors/**"] },
+      { "name": "shared", "patterns": ["src/shared/**"] },
+      { "name": "github", "patterns": ["src/github/**"] },
+      { "name": "publication", "patterns": ["src/publication/**"] },
+      { "name": "entrypoints", "patterns": ["src/entrypoints/**"] },
+      { "name": "canary", "patterns": ["src/canary/**"] },
+      { "name": "api", "patterns": ["src/index.ts"] }
+    ],
+    "rules": [
+      { "from": "contracts", "allow": ["contracts"] },
+      { "from": "errors", "allow": ["contracts", "errors"] },
+      { "from": "shared", "allow": ["shared"] },
+      { "from": "github", "allow": ["contracts", "errors", "github", "shared"] },
+      { "from": "publication", "allow": ["contracts", "errors", "github", "publication", "shared"] },
+      { "from": "entrypoints", "allow": ["contracts", "errors", "github", "publication", "shared"] },
+      { "from": "canary", "allow": ["contracts", "entrypoints", "shared"] },
+      { "from": "api", "allow": ["entrypoints"] }
+    ]
+  },
+  "rulePacks": ["fallow-worker-rules.json"],
   "health": {
     "ignore": ["src/contracts/generated.js"]
   }

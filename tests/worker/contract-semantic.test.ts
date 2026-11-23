@@ -34,6 +34,24 @@ describe("publication semantic validation", () => {
     expect(errors.map((error) => error.code)).toEqual(["INVALID_EVENT_PAYLOAD"]);
   });
 
+  it("requires all pull request event details", async () => {
+    const missingNumber = await semanticErrors("publication-event", {
+      ...eventBase,
+      type: "publication.pull_request_created",
+      state: "published",
+      pullRequestNumber: undefined,
+    });
+    const complete = await semanticErrors("publication-event", {
+      ...eventBase,
+      type: "publication.pull_request_created",
+      state: "published",
+      pullRequestNumber: 17,
+    });
+
+    expect(missingNumber.map((error) => error.code)).toEqual(["INVALID_EVENT_PAYLOAD"]);
+    expect(complete).toEqual([]);
+  });
+
   it("requires an error code for failure events", async () => {
     const errors = await semanticErrors("publication-event", {
       ...eventBase,
@@ -46,6 +64,22 @@ describe("publication semantic validation", () => {
 
     expect(errors.map((error) => error.code)).toEqual(["INVALID_EVENT_PAYLOAD"]);
   });
+
+  it.each(["publication.retryable_failure", "publication.blocked"] as const)(
+    "requires an error code for %s events",
+    async (type) => {
+      const errors = await semanticErrors("publication-event", {
+        ...eventBase,
+        type,
+        state: type === "publication.blocked" ? "blocked" : "retryable_failure",
+        repository: undefined,
+        branchRef: undefined,
+        commitSha: undefined,
+      });
+
+      expect(errors.map((error) => error.code)).toEqual(["INVALID_EVENT_PAYLOAD"]);
+    },
+  );
 
   it("checks event code taxonomy and classification against lifecycle state", async () => {
     const unknownCode = await semanticErrors("publication-event", { ...eventBase, errorCode: "UNKNOWN" });
