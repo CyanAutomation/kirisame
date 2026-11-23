@@ -1,6 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { validateContract } from "../contracts/validate.js";
-import type { PublicationError, PublicationRequest, PublicationResult, PublisherResponse } from "../contracts/types.js";
+import type { PublicationError, PublicationRequest, PublicationResult, PublisherResponse, ValidationIssue } from "../contracts/types.js";
 import { asPublicationFailure, PublicationFailure } from "../errors/publication-error.js";
 import { PublicationService } from "../publication/service.js";
 import { createProductionPublicationService, type PublisherRuntimeEnvironment } from "../publication/runtime.js";
@@ -28,6 +28,21 @@ export async function handlePublisherJson(
 ): Promise<PublisherResponse> {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
+  const value = await parsePublisherRequest(requestJson, requestId);
+  if (isPublicationError(value)) return value;
+  const application = publicationFunction(publish);
+  try {
+    const result = await application(value);
+    logPublicationSuccess(result, requestId, startedAt);
+    return result;
+  } catch (error) {
+    const failure = asPublicationFailure(error);
+    logPublicationFailure(value, failure, requestId, startedAt);
+    return failure.toContractError(requestId);
+  }
+}
+
+async function parsePublisherRequest(requestJson: unknown, requestId: string): Promise<PublicationRequest | PublicationError> {
   if (typeof requestJson !== "string") {
     return invalidResponse("INVALID_REQUEST", "The private RPC payload must be a JSON string.", requestId);
   }
@@ -43,59 +58,70 @@ export async function handlePublisherJson(
   }
 
   const validation = await validateContract("publication-request", value);
-  if (!validation.valid) {
-    const version = isRecord(value) ? value.contractVersion : undefined;
-    const semanticCode = validation.errors.find((item) => item.source === "semantic")?.code;
-    if (version !== undefined && version !== "1") {
-      return invalidResponse("UNSUPPORTED_VERSION", "The publication contract version is not supported.", requestId);
-    }
-    if (semanticCode === "ARTIFACT_DIGEST_MISMATCH") {
-      return invalidResponse("ARTIFACT_DIGEST_MISMATCH", "The artifact digest does not match the supplied artifact.", requestId);
-    }
-    if (semanticCode === "ARTIFACT_PROVENANCE_MISMATCH") {
-      return invalidResponse("ARTIFACT_PROVENANCE_MISMATCH", "The artifact does not match the authorized execution.", requestId);
-    }
-    if (semanticCode === "UNSUPPORTED_GIT_ATTRIBUTES_CHANGE") {
-      return new PublicationFailure("UNSUPPORTED_GIT_OBJECT").toContractError(requestId);
-    }
-    return invalidResponse(semanticCode ? "ARTIFACT_INVALID" : "INVALID_REQUEST", "The publication request failed contract validation.", requestId);
-  }
-
-  const application = publish instanceof PublicationService
-    ? (candidate: PublicationRequest) => publish.publish(candidate)
-    : publish;
-  try {
-    const result = await application(value as PublicationRequest);
-    console.info(JSON.stringify({
-      operation: "publication",
-      requestId,
-      publicationId: result.publicationId,
-      runId: result.runId,
-      mode: result.mode,
-      outcome: result.outcome,
-      retryable: result.retryable,
-      reconciliation: result.reconciliation,
-      durationMs: Date.now() - startedAt,
-    }));
-    return result;
-  } catch (error) {
-    const failure = asPublicationFailure(error);
-    const requestRecord = isRecord(value) ? value : undefined;
-    console.warn(JSON.stringify({
-      operation: "publication",
-      requestId,
-      ...(typeof requestRecord?.publicationId === "string" ? { publicationId: requestRecord.publicationId } : {}),
-      ...(typeof requestRecord?.runId === "string" ? { runId: requestRecord.runId } : {}),
-      code: failure.code,
-      classification: failure.classification,
-      retryable: failure.classification === "retryable",
-      durationMs: Date.now() - startedAt,
-    }));
-    return failure.toContractError(requestId);
-  }
+  return validation.valid ? value as PublicationRequest : invalidValidationResponse(value, validation.errors, requestId);
 }
 
-export async function unavailableResult(request: PublicationRequest): Promise<PublicationResult> {
+function invalidValidationResponse(value: unknown, errors: ValidationIssue[], requestId: string): PublicationError {
+  const version = isRecord(value) ? value.contractVersion : undefined;
+  const semanticCode = errors.find((item) => item.source === "semantic")?.code;
+  if (version !== undefined && version !== "1") {
+    return invalidResponse("UNSUPPORTED_VERSION", "The publication contract version is not supported.", requestId);
+  }
+  if (semanticCode === "ARTIFACT_DIGEST_MISMATCH") {
+    return invalidResponse("ARTIFACT_DIGEST_MISMATCH", "The artifact digest does not match the supplied artifact.", requestId);
+  }
+  if (semanticCode === "ARTIFACT_PROVENANCE_MISMATCH") {
+    return invalidResponse("ARTIFACT_PROVENANCE_MISMATCH", "The artifact does not match the authorized execution.", requestId);
+  }
+  if (semanticCode === "UNSUPPORTED_GIT_ATTRIBUTES_CHANGE") {
+    return new PublicationFailure("UNSUPPORTED_GIT_OBJECT").toContractError(requestId);
+  }
+  return invalidResponse(semanticCode ? "ARTIFACT_INVALID" : "INVALID_REQUEST", "The publication request failed contract validation.", requestId);
+}
+
+function isPublicationError(value: PublicationRequest | PublicationError): value is PublicationError {
+  return "code" in value;
+}
+
+function publicationFunction(publish: Publish | PublicationService): Publish {
+  return publish instanceof PublicationService
+    ? (candidate) => publish.publish(candidate)
+    : publish;
+}
+
+function logPublicationSuccess(result: PublicationResult, requestId: string, startedAt: number): void {
+  console.info(JSON.stringify({
+    operation: "publication",
+    requestId,
+    publicationId: result.publicationId,
+    runId: result.runId,
+    mode: result.mode,
+    outcome: result.outcome,
+    retryable: result.retryable,
+    reconciliation: result.reconciliation,
+    durationMs: Date.now() - startedAt,
+  }));
+}
+
+function logPublicationFailure(
+  request: PublicationRequest,
+  failure: PublicationFailure,
+  requestId: string,
+  startedAt: number,
+): void {
+  console.warn(JSON.stringify({
+    operation: "publication",
+    requestId,
+    publicationId: request.publicationId,
+    runId: request.runId,
+    code: failure.code,
+    classification: failure.classification,
+    retryable: failure.classification === "retryable",
+    durationMs: Date.now() - startedAt,
+  }));
+}
+
+async function unavailableResult(request: PublicationRequest): Promise<PublicationResult> {
   return {
     contractVersion: "1",
     publicationId: request.publicationId,

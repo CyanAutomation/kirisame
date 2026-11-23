@@ -1,7 +1,8 @@
 import type { PublicationRequest, Repository } from "../contracts/types.js";
 import { PublicationFailure } from "../errors/publication-error.js";
-import { repositoryKey } from "../publication/policy.js";
 import { utf8 } from "../contracts/integrity.js";
+import { repositoryKey } from "./repository-key.js";
+import { validateGitObjectPath } from "./git-paths.js";
 import { gitBlobSha, gitCommitSha, gitTreeSha } from "./git-objects.js";
 import type { GitHubAdapter } from "./GitHubAdapter.js";
 import type {
@@ -46,6 +47,20 @@ const BASE_FILES = [
   { path: "docs/guide.md", content: "Current guide.\n" },
   { path: "obsolete.txt", content: "Obsolete file.\n" },
 ] as const;
+
+function faultFailure(operation: GitHubOperation, fault: MockFault): PublicationFailure {
+  if (fault.code === "TREE_TRUNCATED") return new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  if (fault.code === "API_CONFLICT") return new PublicationFailure(apiConflictCode(operation));
+  if (fault.code === "PR_LIST_INCOMPLETE") return new PublicationFailure("GITHUB_UNAVAILABLE");
+  const options = fault.code === "GITHUB_RATE_LIMITED" ? { retryAfterSeconds: fault.retryAfterSeconds ?? 60 } : {};
+  return new PublicationFailure(fault.code, options);
+}
+
+function apiConflictCode(operation: GitHubOperation): "BRANCH_CONFLICT" | "PULL_REQUEST_CONFLICT" | "BASE_TREE_CONFLICT" {
+  if (operation === "createRef") return "BRANCH_CONFLICT";
+  if (operation === "createPullRequest") return "PULL_REQUEST_CONFLICT";
+  return "BASE_TREE_CONFLICT";
+}
 
 export class MockGitHubAdapter implements GitHubAdapter {
   readonly operations: GitHubOperation[] = [];
@@ -223,7 +238,7 @@ export class MockGitHubAdapter implements GitHubAdapter {
     const flattened = await this.#flattenTree(state, baseTreeSha);
     const leaves = new Map(flattened.filter((entry) => entry.type !== "tree").map((entry) => [entry.path, { ...entry }]));
     for (const update of updates) {
-      validateUpdatePath(update.path);
+      validateGitObjectPath(update.path);
       if (update.mode !== "100644" || update.type !== "blob") throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
       const current = leaves.get(update.path);
       if (update.sha === null) {
@@ -323,16 +338,7 @@ export class MockGitHubAdapter implements GitHubAdapter {
     }
     fault.times = (fault.times ?? 1) - 1;
     if (fault.times <= 0) faults?.shift();
-    if (fault.code === "TREE_TRUNCATED") throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-    if (fault.code === "API_CONFLICT") {
-      const code = operation === "createRef" ? "BRANCH_CONFLICT"
-        : operation === "createPullRequest" ? "PULL_REQUEST_CONFLICT"
-          : "BASE_TREE_CONFLICT";
-      throw new PublicationFailure(code);
-    }
-    if (fault.code === "PR_LIST_INCOMPLETE") throw new PublicationFailure("GITHUB_UNAVAILABLE");
-    const options = fault.code === "GITHUB_RATE_LIMITED" ? { retryAfterSeconds: fault.retryAfterSeconds ?? 60 } : {};
-    throw new PublicationFailure(fault.code, options);
+    throw faultFailure(operation, fault);
   }
 
   async #flattenTree(state: MockRepository, treeSha: string, prefix = "", depth = 0): Promise<GitTreeEntry[]> {
@@ -352,7 +358,7 @@ export class MockGitHubAdapter implements GitHubAdapter {
   async #buildTree(trees: Map<string, GitTreeEntry[]>, leaves: GitTreeEntry[]): Promise<string> {
     const root: TreeNode = { children: new Map() };
     for (const leaf of leaves) {
-      validateUpdatePath(leaf.path);
+      validateGitObjectPath(leaf.path);
       const parts = leaf.path.split("/");
       let node = root;
       for (const part of parts.slice(0, -1)) {
@@ -414,12 +420,6 @@ export class MockGitHubAdapter implements GitHubAdapter {
 function normalizeRef(value: string): string {
   if (value.startsWith("refs/heads/")) return value.slice("refs/heads/".length);
   return value;
-}
-
-function validateUpdatePath(path: string): void {
-  if (!path || path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")) {
-    throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-  }
 }
 
 function assertNoPathCollisions(paths: string[]): void {

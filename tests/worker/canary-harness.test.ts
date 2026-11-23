@@ -89,6 +89,31 @@ describe("private canary harness", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: "CANARY_UNAVAILABLE" });
   });
+
+  it("rejects malformed JSON before calling the publisher", async () => {
+    let called = false;
+    const response = await handleCanaryRequest(
+      localRequest("{"),
+      { ...enabled, KIRISAME: { publish: async () => { called = true; return publicationResult.value as PublisherResponse; } } },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVALID_REQUEST" });
+    expect(called).toBe(false);
+  });
+
+  it("returns one result without replay when the first publication is not confirmed", async () => {
+    const first = { code: "GITHUB_UNAVAILABLE", classification: "retryable", message: "Retry later." } as PublisherResponse;
+    let calls = 0;
+    const response = await handleCanaryRequest(localRequest(requestJson), {
+      ...enabled,
+      KIRISAME: { publish: async () => { calls += 1; return first; } },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ first, replay: null });
+    expect(calls).toBe(1);
+  });
 });
 
 function localRequest(body: string): Request {

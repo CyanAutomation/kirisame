@@ -131,7 +131,7 @@ A publication request is expected to contain, or securely reference:
 | `artifact` | Reference or payload containing validated changes |
 | `artifactDigest` | Integrity reference for the publication contents |
 
-The canonical contract is JSON Schema Draft 2020-12 under [contracts/v1](contracts/v1/). It defines publication requests and results, artifact manifests, structured errors and lifecycle events. Runtime validation reuses the same schema-derived TypeScript validators as the contract tests. Run all checks with `npm ci`, `npm run typecheck`, `npm run lint`, `npm test` and `npm run build`.
+The canonical contract is JSON Schema Draft 2020-12 under [contracts/v1](contracts/v1/). It defines publication requests and results, artifact manifests, structured errors and lifecycle events. Runtime validation reuses the same schema-derived TypeScript validators as the contract tests. Run `npm run health` to generate Worker test coverage and produce a measured Fallow health report. Run all checks with `npm ci`, `npm run typecheck`, `npm run lint`, `npm test` and `npm run build`.
 
 ### Default publication policy
 

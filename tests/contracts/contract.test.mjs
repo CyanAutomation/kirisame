@@ -124,6 +124,31 @@ test('non-canonical base64 padding and unsafe Unicode paths fail', async () => {
   assert.ok(result.errors.some((error) => error.code === 'UNSAFE_PATH'));
 });
 
+test('artifact paths reject case-insensitive duplicates and file-directory collisions', async (t) => {
+  await t.test('case-insensitive duplicate paths', async () => {
+    const item = await fixture(validDir, 'artifact-add-modify-delete.json');
+    item.value.files[1].path = 'readme.md';
+    item.value.files.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+
+    const result = await validateContract(item.documentType, item.value);
+    assert.ok(result.errors.some((error) => error.code === 'DUPLICATE_OR_CONFLICTING_PATH'));
+  });
+
+  await t.test('a file cannot also be a parent directory', async () => {
+    const item = await fixture(validDir, 'artifact-add-modify-delete.json');
+    const parent = structuredClone(item.value.files[0]);
+    const child = structuredClone(item.value.files[0]);
+    parent.path = 'config';
+    child.path = 'config/settings.json';
+    item.value.files = [parent, child];
+    item.value.fileCount = item.value.files.length;
+    item.value.totalBytes = item.value.files.reduce((total, file) => total + file.content.byteLength, 0);
+
+    const result = await validateContract(item.documentType, item.value);
+    assert.ok(result.errors.some((error) => error.code === 'DUPLICATE_OR_CONFLICTING_PATH'));
+  });
+});
+
 test('decoded file size is enforced independently from the declared byte length', async () => {
   const item = await fixture(validDir, 'artifact-add-modify-delete.json');
   const file = item.value.files[0];

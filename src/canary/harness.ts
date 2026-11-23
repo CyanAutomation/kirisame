@@ -1,6 +1,7 @@
 import { validateContract } from "../contracts/validate.js";
 import type { PublicationRequest, PublisherResponse } from "../contracts/types.js";
 import { MAX_REQUEST_BODY_BYTES } from "../entrypoints/publisher.js";
+import { readLimitedBytes } from "../shared/streams.js";
 
 interface CanaryPublisherBinding {
   publish(requestJson: string): Promise<PublisherResponse>;
@@ -13,6 +14,12 @@ interface CanaryEnvironment extends Record<string, unknown> {
   KIRISAME_CANARY_BASE_REF?: unknown;
 }
 
+interface ConfiguredCanaryEnvironment extends CanaryEnvironment {
+  KIRISAME: CanaryPublisherBinding;
+  KIRISAME_CANARY_REPOSITORY: string;
+  KIRISAME_CANARY_BASE_REF: string;
+}
+
 const NOT_FOUND = { code: "NOT_FOUND", message: "Not found" };
 
 export default {
@@ -22,42 +29,63 @@ export default {
 };
 
 export async function handleCanaryRequest(request: Request, environment: unknown): Promise<Response> {
+  if (!isCanaryPublishRequest(request)) return json(NOT_FOUND, 404);
+  const canaryEnvironment = readCanaryEnvironment(environment);
+  if (!canaryEnvironment) return json({ code: "CANARY_UNAVAILABLE", message: "The private canary is not configured." }, 503);
+
+  const parsed = await parseCanaryRequest(request);
+  if (parsed instanceof Response) return parsed;
+  if (!isWithinCanaryScope(parsed.publication, canaryEnvironment)) {
+    return json({ code: "CANARY_POLICY_DENIED", message: "The request is outside the explicitly configured canary scope." }, 403);
+  }
+  return publishAndReplay(parsed.requestJson, canaryEnvironment.KIRISAME);
+}
+
+function isCanaryPublishRequest(request: Request): boolean {
   const url = new URL(request.url);
-  if (!isLoopbackHost(url.hostname) || url.pathname !== "/__canary/publish-replay" || request.method !== "POST") {
-    return json(NOT_FOUND, 404);
-  }
+  return isLoopbackHost(url.hostname) && url.pathname === "/__canary/publish-replay" && request.method === "POST";
+}
 
-  const canaryEnvironment = isRecord(environment) ? environment as CanaryEnvironment : undefined;
-  if (!canaryEnvironment || canaryEnvironment.KIRISAME_CANARY_ENABLED !== "true"
-    || typeof canaryEnvironment.KIRISAME_CANARY_REPOSITORY !== "string" || !canaryEnvironment.KIRISAME_CANARY_REPOSITORY
-    || typeof canaryEnvironment.KIRISAME_CANARY_BASE_REF !== "string" || !canaryEnvironment.KIRISAME_CANARY_BASE_REF
-    || !isPublisherBinding(canaryEnvironment.KIRISAME)) {
-    return json({ code: "CANARY_UNAVAILABLE", message: "The private canary is not configured." }, 503);
-  }
+function readCanaryEnvironment(environment: unknown): ConfiguredCanaryEnvironment | undefined {
+  if (!isRecord(environment)) return undefined;
+  const canary = environment as CanaryEnvironment;
+  return canary.KIRISAME_CANARY_ENABLED === "true"
+    && typeof canary.KIRISAME_CANARY_REPOSITORY === "string" && Boolean(canary.KIRISAME_CANARY_REPOSITORY)
+    && typeof canary.KIRISAME_CANARY_BASE_REF === "string" && Boolean(canary.KIRISAME_CANARY_BASE_REF)
+    && isPublisherBinding(canary.KIRISAME) ? canary as ConfiguredCanaryEnvironment : undefined;
+}
 
+async function parseCanaryRequest(request: Request): Promise<{ requestJson: string; publication: PublicationRequest } | Response> {
   const requestJson = await readRequestJson(request);
-  if (requestJson === undefined) return json({ code: "INVALID_REQUEST", message: "The request is invalid or exceeds the configured size limit." }, 400);
+  if (requestJson === undefined) {
+    return json({ code: "INVALID_REQUEST", message: "The request is invalid or exceeds the configured size limit." }, 400);
+  }
+
   let body: unknown;
   try {
     body = JSON.parse(requestJson);
   } catch {
     return json({ code: "INVALID_REQUEST", message: "The request must be valid JSON." }, 400);
   }
-
   const validation = await validateContract("publication-request", body);
-  if (!validation.valid) return json({ code: "INVALID_REQUEST", message: "The request does not match the Kirisame v1 contract." }, 400);
-  const publication = body as PublicationRequest;
-  const allowedRepository = canaryEnvironment.KIRISAME_CANARY_REPOSITORY;
-  const [owner, name, extra] = allowedRepository.split("/");
-  if (extra !== undefined || !owner || !name || publication.mode !== "pr"
-    || `${publication.repository.owner}/${publication.repository.name}`.toLowerCase() !== allowedRepository.toLowerCase()
-    || publication.baseRef !== canaryEnvironment.KIRISAME_CANARY_BASE_REF
-    || publication.headRef !== `kirisame/p/${publication.publicationId}`) {
-    return json({ code: "CANARY_POLICY_DENIED", message: "The request is outside the explicitly configured canary scope." }, 403);
+  if (!validation.valid) {
+    return json({ code: "INVALID_REQUEST", message: "The request does not match the Kirisame v1 contract." }, 400);
   }
+  return { requestJson, publication: body as PublicationRequest };
+}
 
+function isWithinCanaryScope(publication: PublicationRequest, environment: ConfiguredCanaryEnvironment): boolean {
+  const allowedRepository = environment.KIRISAME_CANARY_REPOSITORY;
+  const [owner, name, extra] = allowedRepository.split("/");
+  return extra === undefined && Boolean(owner && name)
+    && publication.mode === "pr"
+    && `${publication.repository.owner}/${publication.repository.name}`.toLowerCase() === allowedRepository.toLowerCase()
+    && publication.baseRef === environment.KIRISAME_CANARY_BASE_REF
+    && publication.headRef === `kirisame/p/${publication.publicationId}`;
+}
+
+async function publishAndReplay(requestJson: string, publisher: CanaryPublisherBinding): Promise<Response> {
   try {
-    const publisher = canaryEnvironment.KIRISAME;
     const first = await publisher.publish(requestJson);
     if (!isConfirmedPr(first)) return json({ first, replay: null }, 200);
     let replay: PublisherResponse | null = null;
@@ -74,32 +102,10 @@ export async function handleCanaryRequest(request: Request, environment: unknown
 
 async function readRequestJson(request: Request): Promise<string | undefined> {
   if (!request.body) return undefined;
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
+  const bytes = await readLimitedBytes(request.body, MAX_REQUEST_BODY_BYTES);
+  if (!bytes) return undefined;
   try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (total > MAX_REQUEST_BODY_BYTES) {
-        await reader.cancel();
-        return undefined;
-      }
-      chunks.push(next.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    const value = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return value;
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     return undefined;
   }

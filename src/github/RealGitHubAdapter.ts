@@ -3,7 +3,10 @@ import type { Repository } from "../contracts/types.js";
 import { PublicationFailure } from "../errors/publication-error.js";
 import { createGitHubAppJwt, type GitHubAppCredentials, validateGitHubAppCredentials } from "./GitHubAppAuth.js";
 import { gitBlobSha, validGitSha } from "./git-objects.js";
+import { repositoryKey } from "./repository-key.js";
+import { validateGitObjectPath } from "./git-paths.js";
 import type { GitHubAdapter } from "./GitHubAdapter.js";
+import { readLimitedBytes } from "../shared/streams.js";
 import type {
   CreateCommitInput,
   CreatePullRequestInput,
@@ -193,7 +196,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
       if (update.mode !== "100644" || update.type !== "blob" || (update.sha !== null && !validGitSha(update.sha))) {
         throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
       }
-      validateApiPath(update.path);
+      validateGitObjectPath(update.path);
       return { path: update.path, mode: update.mode, type: update.type, sha: update.sha };
     });
     const result = await this.#request(`${repoApiPath(repository)}/git/trees`, {
@@ -291,26 +294,12 @@ export class RealGitHubAdapter implements GitHubAdapter {
     const result = await this.#request(`${repoApiPath(repository)}/git/trees/${treeSha}`, {
       token: this.#token(repository), maxBytes: MAX_JSON_RESPONSE_BYTES,
     });
-    const record = asRecord(result.data);
-    if (record.sha !== treeSha || record.truncated !== false || !Array.isArray(record.tree)) {
-      throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-    }
-    const output: GitTreeEntry[] = [];
-    const names = new Set<string>();
-    for (const item of record.tree) {
-      const raw = asRecord(item);
-      const name = stringAt(raw, "path");
-      const mode = stringAt(raw, "mode");
-      const type = stringAt(raw, "type");
-      const sha = stringAt(raw, "sha");
-      if (!name || name.includes("/") || name === "." || name === ".." || !validGitSha(sha)
-        || !isValidModeType(mode, type) || names.has(name)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-      names.add(name);
-      entryCounter.count += 1;
-      if (entryCounter.count > MAX_TREE_ENTRIES) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-      const path = prefix ? `${prefix}/${name}` : name;
-      output.push({ path, mode, type, sha });
-      if (type === "tree") output.push(...await this.#readTreeRecursive(repository, sha, path, depth + 1, entryCounter));
+    const entries = parseGitTreePage(result.data, treeSha, prefix, entryCounter);
+    const output = [...entries];
+    for (const entry of entries) {
+      if (entry.type === "tree") {
+        output.push(...await this.#readTreeRecursive(repository, entry.sha, entry.path, depth + 1, entryCounter));
+      }
     }
     return output;
   }
@@ -337,64 +326,11 @@ export class RealGitHubAdapter implements GitHubAdapter {
       body = JSON.stringify(options.body);
     }
     try {
-      let response: Response;
-      try {
-        response = await this.#fetch(url, {
-          method: options.method ?? "GET",
-          headers,
-          ...(body !== undefined ? { body } : {}),
-          redirect: "error",
-          signal: controller.signal,
-        });
-      } catch {
-        throw new PublicationFailure(controller.signal.aborted ? "GITHUB_TIMEOUT" : "GITHUB_UNAVAILABLE");
-      }
-
-      if (response.status === 404 && options.allowNotFound) {
-        httpStatus = response.status;
-        outcome = "not_found";
-        await response.body?.cancel();
-        return undefined;
-      }
+      const response = await fetchGitHubResponse(this.#fetch, url, options, headers, body, controller.signal);
       httpStatus = response.status;
-      if (!response.ok) {
-        const retryAfter = parseRetryAfter(response.headers.get("retry-after"), this.#now());
-        const rateLimitRemaining = response.headers.get("x-ratelimit-remaining");
-        const errorMessage = await readResponseText(response, MAX_ERROR_RESPONSE_BYTES).catch(() => "");
-        if (response.status === 401) throw new PublicationFailure("GITHUB_AUTH_INVALID");
-        if (response.status === 403 || response.status === 429) {
-          if (response.status === 429 || retryAfter !== undefined || rateLimitRemaining === "0" || isRateLimitMessage(errorMessage)) {
-            throw new PublicationFailure("GITHUB_RATE_LIMITED", { retryAfterSeconds: retryAfter ?? resetDelay(response.headers.get("x-ratelimit-reset"), this.#now()) });
-          }
-          throw new PublicationFailure("GITHUB_PERMISSION_DENIED");
-        }
-        if (response.status === 404) throw new PublicationFailure(options.notFoundCode ?? "GITHUB_UNAVAILABLE");
-        if (response.status === 408) throw new PublicationFailure("GITHUB_TIMEOUT");
-        if (response.status === 409) throw new PublicationFailure(options.conflictCode ?? "GITHUB_UNAVAILABLE");
-        if (response.status === 422) throw new PublicationFailure(options.unprocessableCode ?? "GITHUB_UNAVAILABLE");
-        if (response.status >= 500) throw new PublicationFailure("GITHUB_UNAVAILABLE");
-        throw new PublicationFailure("GITHUB_UNAVAILABLE");
-      }
-      if (response.status === 204) {
-        await response.body?.cancel();
-        outcome = "success";
-        return { data: undefined, headers: response.headers, status: response.status };
-      }
-      let text: string;
-      try {
-        text = await readResponseText(response, options.maxBytes ?? MAX_JSON_RESPONSE_BYTES);
-      } catch (error) {
-        if (controller.signal.aborted) throw new PublicationFailure("GITHUB_TIMEOUT");
-        throw error;
-      }
-      let data: unknown;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new PublicationFailure("GITHUB_UNAVAILABLE");
-      }
-      outcome = "success";
-      return { data, headers: response.headers, status: response.status };
+      const processed = await processGitHubResponse(response, options, this.#now, controller.signal);
+      outcome = processed.outcome;
+      return processed.result;
     } catch (error) {
       if (error instanceof PublicationFailure) outcome = error.code;
       else outcome = "GITHUB_UNAVAILABLE";
@@ -426,6 +362,133 @@ export class RealGitHubAdapter implements GitHubAdapter {
   }
 }
 
+function parseGitTreePage(
+  value: unknown,
+  treeSha: string,
+  prefix: string,
+  entryCounter: { count: number },
+): GitTreeEntry[] {
+  const record = asRecord(value);
+  if (record.sha !== treeSha || record.truncated !== false || !Array.isArray(record.tree)) {
+    throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  }
+  const names = new Set<string>();
+  return record.tree.map((item) => parseGitTreeEntry(item, prefix, names, entryCounter));
+}
+
+function parseGitTreeEntry(
+  item: unknown,
+  prefix: string,
+  names: Set<string>,
+  entryCounter: { count: number },
+): GitTreeEntry {
+  const raw = asRecord(item);
+  const name = stringAt(raw, "path");
+  const mode = stringAt(raw, "mode");
+  const type = stringAt(raw, "type");
+  const sha = stringAt(raw, "sha");
+  if (!name || name.includes("/") || name === "." || name === ".." || !validGitSha(sha)
+    || !isValidModeType(mode, type) || names.has(name)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  names.add(name);
+  entryCounter.count += 1;
+  if (entryCounter.count > MAX_TREE_ENTRIES) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  return { path: prefix ? `${prefix}/${name}` : name, mode, type, sha };
+}
+
+interface ProcessedResponse {
+  result: JsonResponse | undefined;
+  outcome: "success" | "not_found";
+}
+
+async function fetchGitHubResponse(
+  fetcher: typeof fetch,
+  url: URL,
+  options: RequestOptions,
+  headers: Headers,
+  body: string | undefined,
+  signal: AbortSignal,
+): Promise<Response> {
+  try {
+    return await fetcher(url, {
+      method: options.method ?? "GET",
+      headers,
+      ...(body !== undefined ? { body } : {}),
+      redirect: "error",
+      signal,
+    });
+  } catch {
+    throw new PublicationFailure(signal.aborted ? "GITHUB_TIMEOUT" : "GITHUB_UNAVAILABLE");
+  }
+}
+
+async function processGitHubResponse(
+  response: Response,
+  options: RequestOptions,
+  now: () => number,
+  signal: AbortSignal,
+): Promise<ProcessedResponse> {
+  if (response.status === 404 && options.allowNotFound) {
+    await response.body?.cancel();
+    return { result: undefined, outcome: "not_found" };
+  }
+  if (!response.ok) throw await responseFailure(response, options, now);
+  if (response.status === 204) {
+    await response.body?.cancel();
+    return { result: { data: undefined, headers: response.headers, status: response.status }, outcome: "success" };
+  }
+
+  const text = await readSuccessText(response, options.maxBytes ?? MAX_JSON_RESPONSE_BYTES, signal);
+  return {
+    result: { data: parseJson(text), headers: response.headers, status: response.status },
+    outcome: "success",
+  };
+}
+
+async function responseFailure(response: Response, options: RequestOptions, now: () => number): Promise<PublicationFailure> {
+  const retryAfter = parseRetryAfter(response.headers.get("retry-after"), now());
+  const rateLimitRemaining = response.headers.get("x-ratelimit-remaining");
+  const errorMessage = await readResponseText(response, MAX_ERROR_RESPONSE_BYTES).catch(() => "");
+  if (response.status === 401) return new PublicationFailure("GITHUB_AUTH_INVALID");
+  if (response.status === 403 || response.status === 429) return rateLimitFailure(response, retryAfter, rateLimitRemaining, errorMessage, now);
+  if (response.status === 404) return new PublicationFailure(options.notFoundCode ?? "GITHUB_UNAVAILABLE");
+  if (response.status === 408) return new PublicationFailure("GITHUB_TIMEOUT");
+  if (response.status === 409) return new PublicationFailure(options.conflictCode ?? "GITHUB_UNAVAILABLE");
+  if (response.status === 422) return new PublicationFailure(options.unprocessableCode ?? "GITHUB_UNAVAILABLE");
+  return new PublicationFailure("GITHUB_UNAVAILABLE");
+}
+
+function rateLimitFailure(
+  response: Response,
+  retryAfter: number | undefined,
+  rateLimitRemaining: string | null,
+  errorMessage: string,
+  now: () => number,
+): PublicationFailure {
+  if (response.status !== 429 && retryAfter === undefined && rateLimitRemaining !== "0" && !isRateLimitMessage(errorMessage)) {
+    return new PublicationFailure("GITHUB_PERMISSION_DENIED");
+  }
+  return new PublicationFailure("GITHUB_RATE_LIMITED", {
+    retryAfterSeconds: retryAfter ?? resetDelay(response.headers.get("x-ratelimit-reset"), now()),
+  });
+}
+
+async function readSuccessText(response: Response, maximumBytes: number, signal: AbortSignal): Promise<string> {
+  try {
+    return await readResponseText(response, maximumBytes);
+  } catch (error) {
+    if (signal.aborted) throw new PublicationFailure("GITHUB_TIMEOUT");
+    throw error;
+  }
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new PublicationFailure("GITHUB_UNAVAILABLE");
+  }
+}
+
 async function readResponseText(response: Response, maximumBytes: number): Promise<string> {
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
@@ -433,29 +496,8 @@ async function readResponseText(response: Response, maximumBytes: number): Promi
     throw new PublicationFailure("GITHUB_UNAVAILABLE");
   }
   if (!response.body) return "";
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (total > maximumBytes) {
-        await reader.cancel();
-        throw new PublicationFailure("GITHUB_UNAVAILABLE");
-      }
-      chunks.push(next.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  const bytes = await readLimitedBytes(response.body, maximumBytes);
+  if (!bytes) throw new PublicationFailure("GITHUB_UNAVAILABLE");
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
@@ -602,20 +644,10 @@ function encodeBranchPath(branch: string): string {
   return branch.split("/").map(encodeURIComponent).join("/");
 }
 
-function validateApiPath(path: string): void {
-  if (!path || path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")) {
-    throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-  }
-}
-
 function isValidModeType(mode: string, type: string): boolean {
   return (mode === "040000" && type === "tree")
     || (["100644", "100755", "120000"].includes(mode) && type === "blob")
     || (mode === "160000" && type === "commit");
-}
-
-function repositoryKey(repository: Repository): string {
-  return `${repository.owner.toLowerCase()}/${repository.name.toLowerCase()}`;
 }
 
 function apiOperationCategory(pathname: string): string {

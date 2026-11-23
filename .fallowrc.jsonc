@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/fallow/schema.json",
+  "minimumVersion": "3.47.0",
+  "entry": ["cloudflare.config.ts"],
+  "supportEntry": ["tests/worker/test-entrypoint.ts"],
+  "health": {
+    "ignore": ["src/contracts/generated.js"]
+  }
+}
