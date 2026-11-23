@@ -90,7 +90,7 @@ describe("deployed live canary workflow", () => {
       "workflow-step-runtime-probe",
       "github-app-installation-and-token-preflight",
     ]);
-    expect(args.every((values) => values.length === 2)).toBe(true);
+    expect(args.every((values) => values.length === 3 && values[1] !== null && typeof values[1] === "object")).toBe(true);
     expect(publisher.verifyCanaryAuthorization).toHaveBeenCalledOnce();
     expect(publisher.publish).not.toHaveBeenCalled();
   });
