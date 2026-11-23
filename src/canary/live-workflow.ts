@@ -32,8 +32,8 @@ interface WorkflowParameters {
 interface DurableStep {
   do(
     name: string,
-    callback: () => Promise<CanaryAuthorizationResult>,
-  ): Promise<CanaryAuthorizationResult>;
+    callback: () => Promise<CanaryAuthorizationStepResult>,
+  ): Promise<CanaryAuthorizationStepResult>;
   do(
     name: string,
     config: { retries: { limit: 0; delay: "1 second" } },
@@ -45,6 +45,10 @@ interface DurableStep {
     callback: () => Promise<CanaryAuthorizationResult>,
   ): Promise<CanaryAuthorizationResult>;
 }
+
+type CanaryAuthorizationStepResult =
+  | { kind: "verified"; result: CanaryAuthorizationResult }
+  | { kind: "publisher-failure"; failureName: SafeWorkflowFailureName };
 
 const NO_AUTOMATIC_RETRIES = { retries: { limit: 0, delay: "1 second" } } as const;
 
@@ -105,18 +109,28 @@ export async function runLiveCanaryPreflight(
   publisher: Pick<PublisherBinding, "verifyCanaryAuthorization">,
   step: DurableStep,
 ): Promise<LiveCanaryPreflightOutcome> {
-  let publisherBindingInvoked = false;
   try {
-    return await step.do("github-app-installation-and-token-preflight", async () => {
-      publisherBindingInvoked = true;
-      return publisher.verifyCanaryAuthorization();
+    const result = await step.do("github-app-installation-and-token-preflight", async () => {
+      try {
+        return { kind: "verified", result: await publisher.verifyCanaryAuthorization() } as const;
+      } catch (error) {
+        return { kind: "publisher-failure", failureName: safeWorkflowFailureName(error) } as const;
+      }
     });
+    return result.kind === "verified"
+      ? result.result
+      : {
+        status: "uncertain",
+        code: "CANARY_PREFLIGHT_UNCERTAIN",
+        failureName: result.failureName,
+        failureStage: "publisher-binding",
+      };
   } catch (error) {
     return {
       status: "uncertain",
       code: "CANARY_PREFLIGHT_UNCERTAIN",
       failureName: safeWorkflowFailureName(error),
-      failureStage: publisherBindingInvoked ? "publisher-binding" : "workflow-step",
+      failureStage: "workflow-step",
     };
   }
 }
