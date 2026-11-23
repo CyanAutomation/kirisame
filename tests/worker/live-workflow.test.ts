@@ -106,6 +106,22 @@ describe("deployed live canary workflow", () => {
       status: "uncertain",
       code: "CANARY_PREFLIGHT_UNCERTAIN",
       failureName: "TypeError",
+      failureStage: "workflow-step",
+    });
+    expect(JSON.stringify(outcome)).not.toContain(failure.message);
+  });
+
+  it("distinguishes a safe Service Binding preflight failure stage", async () => {
+    const failure = new TypeError("binding-error-must-not-escape");
+    const outcome = await runLiveCanaryPreflight({
+      verifyCanaryAuthorization: async () => { throw failure; },
+    }, directStep);
+
+    expect(outcome).toEqual({
+      status: "uncertain",
+      code: "CANARY_PREFLIGHT_UNCERTAIN",
+      failureName: "TypeError",
+      failureStage: "publisher-binding",
     });
     expect(JSON.stringify(outcome)).not.toContain(failure.message);
   });
