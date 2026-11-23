@@ -63,18 +63,33 @@ export class LiveCanaryWorkflow extends WorkflowEntrypoint<WorkflowEnvironment, 
     event: WorkflowEvent<WorkflowParameters>,
     step: WorkflowStep,
   ): Promise<LiveCanaryOutcome | LiveCanaryPreflightOutcome | LiveCanaryAllowlistProbeOutcome> {
+    const parameters = parseWorkflowParameters(event.payload);
     const durableStep: DurableStep = {
       do: step.do.bind(step) as unknown as DurableStep["do"],
     };
-    if (event.payload?.action === "preflight") return runLiveCanaryPreflight(this.env.KIRISAME, durableStep);
-    if (event.payload?.action === "allowlist-probe") {
-      return runLiveCanaryAllowlistProbe(event.payload.requestJson, this.env.KIRISAME, durableStep);
+    if (parameters?.action === "preflight") return runLiveCanaryPreflight(this.env.KIRISAME, durableStep);
+    if (parameters?.action === "allowlist-probe") {
+      return runLiveCanaryAllowlistProbe(parameters.requestJson, this.env.KIRISAME, durableStep);
     }
-    if (event.payload?.action !== undefined && event.payload.action !== "publish") {
+    if (parameters?.action !== undefined && parameters.action !== "publish") {
       return { status: "rejected", code: "CANARY_INVALID_REQUEST" };
     }
-    return runLiveCanary(event.payload?.requestJson, this.env.KIRISAME, durableStep);
+    return runLiveCanary(parameters?.requestJson, this.env.KIRISAME, durableStep);
   }
+}
+
+function parseWorkflowParameters(value: unknown): WorkflowParameters | undefined {
+  let payload = value;
+  if (typeof payload === "string") {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return undefined;
+    }
+  }
+  return typeof payload === "object" && payload !== null && !Array.isArray(payload)
+    ? payload as WorkflowParameters
+    : undefined;
 }
 
 export async function runLiveCanaryPreflight(

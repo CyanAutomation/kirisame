@@ -83,6 +83,25 @@ describe("deployed live canary workflow", () => {
     expect(publisher.publish).not.toHaveBeenCalled();
   });
 
+  it("parses JSON-encoded REST API instance parameters as the workflow payload", async () => {
+    const preflight = { status: "verified", repository: "CyanAutomation/somatic" } as const;
+    const publisher = {
+      publish: vi.fn(async (): Promise<PublisherResponse> => liveResult()),
+      verifyCanaryAuthorization: vi.fn(async () => preflight),
+    };
+    const workflow = Object.create(LiveCanaryWorkflow.prototype) as LiveCanaryWorkflow;
+    Object.defineProperty(workflow, "env", { value: { KIRISAME: publisher } });
+    const event = { payload: JSON.stringify({ action: "preflight", requestJson: "" }) };
+
+    await expect(workflow.run(
+      event as unknown as Parameters<LiveCanaryWorkflow["run"]>[0],
+      directStep as Parameters<LiveCanaryWorkflow["run"]>[1],
+    ))
+      .resolves.toEqual(preflight);
+    expect(publisher.verifyCanaryAuthorization).toHaveBeenCalledOnce();
+    expect(publisher.publish).not.toHaveBeenCalled();
+  });
+
   it("confirms the production allowlist rejects one fixed nonexistent repository", async () => {
     const request = await makeCanaryRequest({ owner: "cyanautomation", name: "kirisame-policy-probe-never-create" });
     const denial = {
