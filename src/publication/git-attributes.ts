@@ -20,7 +20,19 @@ export async function rejectLfsGovernedChanges(
   changedPaths: string[],
   readBlob: (sha: string) => Promise<Uint8Array | undefined>,
 ): Promise<void> {
-  const attributeEntries = entries.filter((entry) => entry.type === "blob" && isAttributesPath(entry.path));
+  const rules = await readAttributeRules(entries, readBlob);
+  for (const changedPath of changedPaths) {
+    if (activeFilterForPath(changedPath, rules) !== null) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  }
+}
+
+async function readAttributeRules(
+  entries: GitTreeEntry[],
+  readBlob: (sha: string) => Promise<Uint8Array | undefined>,
+): Promise<AttributeRule[]> {
+  const attributeEntries = entries
+    .filter((entry) => entry.type === "blob" && isAttributesPath(entry.path))
+    .sort((left, right) => attributeScopeDepth(left.path) - attributeScopeDepth(right.path));
   if (attributeEntries.length > MAX_ATTRIBUTE_FILES) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
 
   const rules: AttributeRule[] = [];
@@ -33,23 +45,23 @@ export async function rejectLfsGovernedChanges(
     rules.push(...parseAttributeFile(entry.path, content));
     if (rules.length > MAX_ATTRIBUTE_RULES) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
   }
+  return rules;
+}
 
-  for (const changedPath of changedPaths) {
-    let activeFilter: string | null = null;
-    for (const rule of rules) {
-      const relativePath = relativeToScope(changedPath, rule.scope);
-      if (relativePath === undefined) continue;
-      if (!rule.pattern.test(relativePath)) continue;
-      for (const attribute of rule.attributes) {
-        if (attribute.name === "filter") {
-          activeFilter = attribute.value;
-        } else if (!SUPPORTED_NON_FILTER_ATTRIBUTES.has(attribute.name)) {
-          throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-        }
+function activeFilterForPath(changedPath: string, rules: AttributeRule[]): string | null {
+  let activeFilter: string | null = null;
+  for (const rule of rules) {
+    const relativePath = relativeToScope(changedPath, rule.scope);
+    if (relativePath === undefined || !rule.pattern.test(relativePath)) continue;
+    for (const attribute of rule.attributes) {
+      if (attribute.name === "filter") {
+        activeFilter = attribute.value;
+      } else if (!SUPPORTED_NON_FILTER_ATTRIBUTES.has(attribute.name)) {
+        throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
       }
     }
-    if (activeFilter !== null) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
   }
+  return activeFilter;
 }
 
 export function isAttributesPath(path: string): boolean {
@@ -67,21 +79,33 @@ function parseAttributeFile(path: string, bytes: Uint8Array): AttributeRule[] {
     throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
   }
 
-  const scope = path === ".gitattributes" ? "" : path.slice(0, -"/.gitattributes".length);
+  const scope = attributeScope(path);
   const rules: AttributeRule[] = [];
   for (const rawLine of text.split(/\r?\n/u)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const tokens = line.split(/\s+/u);
-    const rawPattern = tokens.shift();
-    if (!rawPattern || tokens.length === 0 || rawPattern.startsWith("!") || rawPattern.includes("\\")) {
-      throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-    }
-    const pattern = compilePattern(rawPattern);
-    const attributes = tokens.map(parseAttribute);
-    rules.push({ scope, pattern, attributes });
+    const rule = parseAttributeLine(rawLine, scope);
+    if (rule) rules.push(rule);
   }
   return rules;
+}
+
+function parseAttributeLine(rawLine: string, scope: string): AttributeRule | undefined {
+  const line = rawLine.trim();
+  if (!line || line.startsWith("#")) return undefined;
+  const tokens = line.split(/\s+/u);
+  const rawPattern = tokens.shift();
+  if (!rawPattern || tokens.length === 0 || rawPattern.startsWith("!") || rawPattern.includes("\\")) {
+    throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  }
+  return { scope, pattern: compilePattern(rawPattern), attributes: tokens.map(parseAttribute) };
+}
+
+function attributeScope(path: string): string {
+  return path.toLowerCase() === ".gitattributes" ? "" : path.slice(0, -"/.gitattributes".length);
+}
+
+function attributeScopeDepth(path: string): number {
+  const scope = attributeScope(path);
+  return scope ? scope.split("/").length : 0;
 }
 
 function compilePattern(pattern: string): RegExp {

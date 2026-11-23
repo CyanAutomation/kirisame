@@ -1,31 +1,47 @@
 import { isProductionPublishingConfigured } from "../publication/runtime.js";
 
 const SERVICE = "kirisame";
+type PublicRouteHandler = (environment: unknown) => Response | Promise<Response>;
+const PUBLIC_ROUTES: ReadonlyMap<string, PublicRouteHandler> = new Map<string, PublicRouteHandler>([
+  ["/", rootResponse],
+  ["/health", healthResponse],
+  ["/readyz", readinessResponse],
+]);
 
 export default {
   async fetch(request: Request, env: unknown = {}): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/internal/v1/publications") return json({ code: "NOT_FOUND", message: "Not found" }, 404);
-
-    const routes = new Map<string, string>([["/", "GET"], ["/health", "GET"], ["/readyz", "GET"]]);
-    const method = routes.get(url.pathname);
-    if (!method) return json({ code: "NOT_FOUND", message: "Not found" }, 404);
-    if (request.method !== method) return json({ code: "METHOD_NOT_ALLOWED", message: "Method not allowed" }, 405, { allow: method });
-
-    if (url.pathname === "/") {
-      const available = await isProductionPublishingConfigured(env);
-      return json({
-        service: SERVICE,
-        implementation: "github-app-publisher",
-        publishing: available ? "available" : "unavailable",
-        version: deploymentVersion(env),
-      }, 200);
+    const handler = PUBLIC_ROUTES.get(url.pathname);
+    if (!handler) return json({ code: "NOT_FOUND", message: "Not found" }, 404);
+    if (request.method !== "GET") {
+      return json({ code: "METHOD_NOT_ALLOWED", message: "Method not allowed" }, 405, { allow: "GET" });
     }
-    if (url.pathname === "/health") return json({ status: "ok" }, 200);
-    const available = await isProductionPublishingConfigured(env);
-    return json({ status: available ? "ready" : "not_ready", publishing: available ? "available" : "unavailable" }, available ? 200 : 503);
+    return handler(env);
   },
 };
+
+async function rootResponse(environment: unknown): Promise<Response> {
+  const available = await isProductionPublishingConfigured(environment);
+  return json({
+    service: SERVICE,
+    implementation: "github-app-publisher",
+    publishing: available ? "available" : "unavailable",
+    version: deploymentVersion(environment),
+  }, 200);
+}
+
+function healthResponse(_environment: unknown): Response {
+  return json({ status: "ok" }, 200);
+}
+
+async function readinessResponse(environment: unknown): Promise<Response> {
+  const available = await isProductionPublishingConfigured(environment);
+  return json({
+    status: available ? "ready" : "not_ready",
+    publishing: available ? "available" : "unavailable",
+  }, available ? 200 : 503);
+}
 
 function deploymentVersion(environment: unknown): {
   sourceCommit: string;

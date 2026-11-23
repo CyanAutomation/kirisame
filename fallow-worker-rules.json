@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/fallow/rule-pack-schema.json",
+  "version": 1,
+  "name": "kirisame-worker-runtime",
+  "description": "Keep Worker source free of direct dynamic code evaluation calls.",
+  "rules": [
+    {
+      "id": "no-eval-or-function-constructor",
+      "kind": "banned-call",
+      "callees": ["eval", "Function"],
+      "files": ["src/**/*.ts"],
+      "message": "Direct eval and Function constructor calls are not allowed in Worker source.",
+      "severity": "error"
+    }
+  ]
+}

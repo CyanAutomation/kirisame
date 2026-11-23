@@ -137,23 +137,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
       token: this.#token(repository), allowNotFound: true,
     });
     if (!result) return undefined;
-    const record = asRecord(result.data);
-    const commit = record;
-    const treeSha = stringAt(asRecord(commit.tree), "sha");
-    const message = commit.message;
-    const parentsValue = commit.parents;
-    if (record.sha !== sha || !validGitSha(treeSha) || typeof message !== "string" || message.length === 0
-      || !Array.isArray(parentsValue)) {
-      throw new PublicationFailure("GITHUB_UNAVAILABLE");
-    }
-    const parentShas = parentsValue.map((parent) => stringAt(asRecord(parent), "sha"));
-    if (parentShas.some((parent) => !validGitSha(parent))) throw new PublicationFailure("GITHUB_UNAVAILABLE");
-    return {
-      sha,
-      treeSha,
-      ...(parentShas.length === 1 ? { parentSha: parentShas[0]! } : {}),
-      message,
-    };
+    return parseGitCommit(result.data, sha);
   }
 
   async readTree(repository: Repository, treeSha: string): Promise<GitTreeEntry[]> {
@@ -167,16 +151,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
       token: this.#token(repository), allowNotFound: true, maxBytes: 2 * 1024 * 1024,
     });
     if (!result) return undefined;
-    const record = asRecord(result.data);
-    const size = record.size;
-    const encoding = record.encoding;
-    const content = record.content;
-    if (record.sha !== sha) throw new PublicationFailure("GITHUB_UNAVAILABLE");
-    if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0 || size > 1024 * 1024
-      || encoding !== "base64" || typeof content !== "string") throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-    const bytes = decodeGitHubBase64(content);
-    if (!bytes || bytes.byteLength !== size || await gitBlobSha(bytes) !== sha) throw new PublicationFailure("GITHUB_UNAVAILABLE");
-    return bytes;
+    return decodeGitHubBlob(result.data, sha);
   }
 
   async createBlob(repository: Repository, content: Uint8Array): Promise<string> {
@@ -214,17 +189,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
       method: "POST", token: this.#token(repository),
       body: { message: input.message, tree: input.treeSha, parents: [input.parentSha] },
     });
-    const record = asRecord(result.data);
-    const commit = asRecord(record);
-    const treeSha = stringAt(asRecord(commit.tree), "sha");
-    const message = stringAt(commit, "message");
-    const parentsValue = commit.parents;
-    if (typeof record.sha !== "string" || !validGitSha(record.sha) || treeSha !== input.treeSha
-      || message !== input.message || !Array.isArray(parentsValue) || parentsValue.length !== 1
-      || stringAt(asRecord(parentsValue[0]), "sha") !== input.parentSha) {
-      throw new PublicationFailure("GITHUB_UNAVAILABLE");
-    }
-    return { sha: record.sha, treeSha, parentSha: input.parentSha, message };
+    return parseCreatedGitCommit(result.data, input);
   }
 
   async createRef(repository: Repository, ref: string, sha: string): Promise<void> {
@@ -362,6 +327,51 @@ export class RealGitHubAdapter implements GitHubAdapter {
   }
 }
 
+function parseGitCommit(value: unknown, expectedSha: string): GitCommit {
+  const record = asRecord(value);
+  const treeSha = stringAt(asRecord(record.tree), "sha");
+  const message = record.message;
+  const parents = record.parents;
+  if (record.sha !== expectedSha || !validGitSha(treeSha) || typeof message !== "string" || message.length === 0
+    || !Array.isArray(parents)) throw new PublicationFailure("GITHUB_UNAVAILABLE");
+
+  const parentShas = parents.map((parent) => stringAt(asRecord(parent), "sha"));
+  if (parentShas.some((parent) => !validGitSha(parent))) throw new PublicationFailure("GITHUB_UNAVAILABLE");
+  return {
+    sha: expectedSha,
+    treeSha,
+    ...(parentShas.length === 1 ? { parentSha: parentShas[0]! } : {}),
+    message,
+  };
+}
+
+async function decodeGitHubBlob(value: unknown, expectedSha: string): Promise<Uint8Array> {
+  const record = asRecord(value);
+  if (record.sha !== expectedSha) throw new PublicationFailure("GITHUB_UNAVAILABLE");
+  const { size, encoding, content } = record;
+  if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0 || size > 1024 * 1024
+    || encoding !== "base64" || typeof content !== "string") throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  const bytes = decodeGitHubBase64(content);
+  if (!bytes || bytes.byteLength !== size || await gitBlobSha(bytes) !== expectedSha) {
+    throw new PublicationFailure("GITHUB_UNAVAILABLE");
+  }
+  return bytes;
+}
+
+function parseCreatedGitCommit(value: unknown, input: CreateCommitInput): GitCommit {
+  const record = asRecord(value);
+  const commitSha = stringAt(record, "sha");
+  const treeSha = stringAt(asRecord(record.tree), "sha");
+  const message = stringAt(record, "message");
+  const parents = record.parents;
+  if (!validGitSha(commitSha) || treeSha !== input.treeSha || message !== input.message
+    || !Array.isArray(parents) || parents.length !== 1
+    || stringAt(asRecord(parents[0]), "sha") !== input.parentSha) {
+    throw new PublicationFailure("GITHUB_UNAVAILABLE");
+  }
+  return { sha: commitSha, treeSha, parentSha: input.parentSha, message };
+}
+
 function parseGitTreePage(
   value: unknown,
   treeSha: string,
@@ -387,12 +397,22 @@ function parseGitTreeEntry(
   const mode = stringAt(raw, "mode");
   const type = stringAt(raw, "type");
   const sha = stringAt(raw, "sha");
-  if (!name || name.includes("/") || name === "." || name === ".." || !validGitSha(sha)
-    || !isValidModeType(mode, type) || names.has(name)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  assertGitTreeEntry(name, mode, type, sha, names);
   names.add(name);
   entryCounter.count += 1;
   if (entryCounter.count > MAX_TREE_ENTRIES) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
   return { path: prefix ? `${prefix}/${name}` : name, mode, type, sha };
+}
+
+function assertGitTreeEntry(
+  name: string,
+  mode: string,
+  type: string,
+  sha: string,
+  names: Set<string>,
+): void {
+  if (!name || name.includes("/") || name === "." || name === ".." || !validGitSha(sha)
+    || !isValidModeType(mode, type) || names.has(name)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
 }
 
 interface ProcessedResponse {
@@ -448,13 +468,25 @@ async function responseFailure(response: Response, options: RequestOptions, now:
   const retryAfter = parseRetryAfter(response.headers.get("retry-after"), now());
   const rateLimitRemaining = response.headers.get("x-ratelimit-remaining");
   const errorMessage = await readResponseText(response, MAX_ERROR_RESPONSE_BYTES).catch(() => "");
-  if (response.status === 401) return new PublicationFailure("GITHUB_AUTH_INVALID");
   if (response.status === 403 || response.status === 429) return rateLimitFailure(response, retryAfter, rateLimitRemaining, errorMessage, now);
-  if (response.status === 404) return new PublicationFailure(options.notFoundCode ?? "GITHUB_UNAVAILABLE");
-  if (response.status === 408) return new PublicationFailure("GITHUB_TIMEOUT");
-  if (response.status === 409) return new PublicationFailure(options.conflictCode ?? "GITHUB_UNAVAILABLE");
-  if (response.status === 422) return new PublicationFailure(options.unprocessableCode ?? "GITHUB_UNAVAILABLE");
-  return new PublicationFailure("GITHUB_UNAVAILABLE");
+  return failureForHttpStatus(response.status, options);
+}
+
+function failureForHttpStatus(status: number, options: RequestOptions): PublicationFailure {
+  switch (status) {
+    case 401:
+      return new PublicationFailure("GITHUB_AUTH_INVALID");
+    case 404:
+      return new PublicationFailure(options.notFoundCode ?? "GITHUB_UNAVAILABLE");
+    case 408:
+      return new PublicationFailure("GITHUB_TIMEOUT");
+    case 409:
+      return new PublicationFailure(options.conflictCode ?? "GITHUB_UNAVAILABLE");
+    case 422:
+      return new PublicationFailure(options.unprocessableCode ?? "GITHUB_UNAVAILABLE");
+    default:
+      return new PublicationFailure("GITHUB_UNAVAILABLE");
+  }
 }
 
 function rateLimitFailure(
@@ -516,11 +548,31 @@ function parseInstallation(value: unknown, repository: Repository, expectedAppId
   const login = account.login;
   const suspendedAt = record.suspended_at;
   const permissions = asRecord(record.permissions);
-  if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1
-    || appId === undefined || String(appId) !== expectedAppId
-    || typeof login !== "string" || login.toLowerCase() !== repository.owner.toLowerCase()
-    || (suspendedAt !== undefined && suspendedAt !== null)) throw new PublicationFailure("APP_NOT_INSTALLED");
+  assertInstallationId(id);
+  assertInstallationAppId(appId, expectedAppId);
+  assertInstallationOwner(login, repository);
+  assertInstallationActive(suspendedAt);
   return { id, permissions: stringRecord(permissions) };
+}
+
+function assertInstallationId(value: unknown): asserts value is number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new PublicationFailure("APP_NOT_INSTALLED");
+  }
+}
+
+function assertInstallationAppId(value: unknown, expectedAppId: string): void {
+  if (value === undefined || String(value) !== expectedAppId) throw new PublicationFailure("APP_NOT_INSTALLED");
+}
+
+function assertInstallationOwner(value: unknown, repository: Repository): void {
+  if (typeof value !== "string" || value.toLowerCase() !== repository.owner.toLowerCase()) {
+    throw new PublicationFailure("APP_NOT_INSTALLED");
+  }
+}
+
+function assertInstallationActive(suspendedAt: unknown): void {
+  if (suspendedAt !== undefined && suspendedAt !== null) throw new PublicationFailure("APP_NOT_INSTALLED");
 }
 
 function assertInstallationPermissions(permissions: Record<string, string>, operation: "branch" | "pr"): void {
@@ -543,36 +595,59 @@ function parseInstallationToken(
   const expiresAtString = record.expires_at;
   const expiresAt = typeof expiresAtString === "string" ? Date.parse(expiresAtString) : Number.NaN;
   const permissions = stringRecord(asRecord(record.permissions));
-  const repositoriesValue = record.repositories;
-  if (typeof token !== "string" || token.length < 1 || token.length > 4096
-    || !Number.isFinite(expiresAt) || expiresAt <= now + 60_000
-    || !Array.isArray(repositoriesValue) || repositoriesValue.length !== 1) {
+  if (!isValidInstallationToken(token, expiresAt, now)) throw new PublicationFailure("GITHUB_AUTH_INVALID");
+  const repositories = parseScopedTokenRepository(record.repositories, repository);
+  assertTokenPermissions(permissions, requestedPermissions);
+  return { token, expiresAt, permissions, repositories: [repositories] };
+}
+
+function isValidInstallationToken(value: unknown, expiresAt: number, now: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 4096
+    && Number.isFinite(expiresAt) && expiresAt > now + 60_000;
+}
+
+function parseScopedTokenRepository(value: unknown, repository: Repository): { id: number; fullName: string } {
+  if (!Array.isArray(value) || value.length !== 1) throw new PublicationFailure("GITHUB_AUTH_INVALID");
+  const record = asRecord(value[0]);
+  const id = record.id;
+  const fullName = record.full_name;
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1 || typeof fullName !== "string"
+    || fullName.toLowerCase() !== `${repository.owner}/${repository.name}`.toLowerCase()) {
     throw new PublicationFailure("GITHUB_AUTH_INVALID");
   }
-  const repos = repositoriesValue.map((item) => {
-    const row = asRecord(item);
-    return { id: row.id, fullName: row.full_name };
-  });
-  const exactRepo = repos[0];
-  if (typeof exactRepo?.id !== "number" || !Number.isSafeInteger(exactRepo.id) || typeof exactRepo.fullName !== "string"
-    || exactRepo.fullName.toLowerCase() !== `${repository.owner}/${repository.name}`.toLowerCase()) {
-    throw new PublicationFailure("GITHUB_AUTH_INVALID");
+  return { id, fullName };
+}
+
+function assertTokenPermissions(
+  permissions: Record<string, string>,
+  requestedPermissions: Record<string, string>,
+): void {
+  if (!hasOnlyRequestedPermissions(permissions, requestedPermissions)
+    || !containsRequestedPermissions(permissions, requestedPermissions)) {
+    throw new PublicationFailure("GITHUB_PERMISSION_DENIED");
   }
-  for (const [permission, level] of Object.entries(permissions)) {
-    if (permission === "metadata" && level === "read") continue;
-    if (requestedPermissions[permission] !== level) throw new PublicationFailure("GITHUB_PERMISSION_DENIED");
-  }
-  for (const [permission, level] of Object.entries(requestedPermissions)) {
-    if (permissions[permission] !== level) throw new PublicationFailure("GITHUB_PERMISSION_DENIED");
-  }
-  return { token, expiresAt, permissions, repositories: repos as InstallationTokenResponse["repositories"] };
+}
+
+function hasOnlyRequestedPermissions(
+  permissions: Record<string, string>,
+  requestedPermissions: Record<string, string>,
+): boolean {
+  return Object.entries(permissions).every(([permission, level]) =>
+    (permission === "metadata" && level === "read") || requestedPermissions[permission] === level);
+}
+
+function containsRequestedPermissions(
+  permissions: Record<string, string>,
+  requestedPermissions: Record<string, string>,
+): boolean {
+  return Object.entries(requestedPermissions).every(([permission, level]) => permissions[permission] === level);
 }
 
 function parseRepositoryIdentity(value: unknown, expected: Repository, installationId: number): RepositoryIdentity {
   const record = asRecord(value);
   const id = record.id;
   const fullName = record.full_name;
-  if (typeof id !== "number" || !Number.isSafeInteger(id) || typeof fullName !== "string"
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1 || typeof fullName !== "string"
     || fullName.toLowerCase() !== `${expected.owner}/${expected.name}`.toLowerCase()) {
     throw new PublicationFailure("APP_NOT_INSTALLED");
   }
@@ -585,26 +660,13 @@ function parsePullRequest(value: unknown): PullRequestRecord {
   const url = record.html_url;
   const state = record.state;
   const mergedAt = record.merged_at;
-  const head = asRecord(record.head);
-  const base = asRecord(record.base);
-  let headRepository: Repository;
-  let baseRepository: Repository;
-  try {
-    headRepository = parseRepository(asRecord(head.repo));
-    baseRepository = parseRepository(asRecord(base.repo));
-  } catch {
-    throw new PublicationFailure("PULL_REQUEST_CONFLICT");
-  }
-  const headRef = stringAt(head, "ref");
-  const baseRef = stringAt(base, "ref");
+  const { headRepository, baseRepository, headRef, baseRef } = parsePullRequestRepositories(record);
   const title = stringAt(record, "title");
   const body = record.body === null ? "" : record.body;
-  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1
-    || typeof url !== "string" || !isCanonicalPullRequestUrl(url)
-    || (state !== "open" && state !== "closed")
-    || (mergedAt !== null && typeof mergedAt !== "string")
-    || typeof headRef !== "string" || typeof baseRef !== "string"
-    || typeof title !== "string" || typeof body !== "string") throw new PublicationFailure("GITHUB_UNAVAILABLE");
+  assertPullRequestNumber(number);
+  assertPullRequestUrl(url);
+  assertPullRequestState(state, mergedAt);
+  if (typeof body !== "string") throw new PublicationFailure("GITHUB_UNAVAILABLE");
   const normalizedState = mergedAt ? "merged" : state;
   return {
     number,
@@ -617,6 +679,47 @@ function parsePullRequest(value: unknown): PullRequestRecord {
     title,
     body,
   };
+}
+
+function parsePullRequestRepositories(record: Record<string, unknown>): {
+  headRepository: Repository;
+  baseRepository: Repository;
+  headRef: string;
+  baseRef: string;
+} {
+  try {
+    const head = asRecord(record.head);
+    const base = asRecord(record.base);
+    return {
+      headRepository: parseRepository(asRecord(head.repo)),
+      baseRepository: parseRepository(asRecord(base.repo)),
+      headRef: stringAt(head, "ref"),
+      baseRef: stringAt(base, "ref"),
+    };
+  } catch {
+    throw new PublicationFailure("PULL_REQUEST_CONFLICT");
+  }
+}
+
+function assertPullRequestNumber(value: unknown): asserts value is number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new PublicationFailure("GITHUB_UNAVAILABLE");
+  }
+}
+
+function assertPullRequestUrl(value: unknown): asserts value is string {
+  if (typeof value !== "string" || !isCanonicalPullRequestUrl(value)) {
+    throw new PublicationFailure("GITHUB_UNAVAILABLE");
+  }
+}
+
+function assertPullRequestState(
+  state: unknown,
+  mergedAt: unknown,
+): asserts state is "open" | "closed" {
+  if ((state !== "open" && state !== "closed") || (mergedAt !== null && typeof mergedAt !== "string")) {
+    throw new PublicationFailure("GITHUB_UNAVAILABLE");
+  }
 }
 
 function parseRepository(value: Record<string, unknown>): Repository {
