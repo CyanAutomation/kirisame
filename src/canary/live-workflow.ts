@@ -80,9 +80,7 @@ export class LiveCanaryWorkflow extends WorkflowEntrypoint<WorkflowEnvironment, 
     step: WorkflowStep,
   ): Promise<LiveCanaryOutcome | LiveCanaryPreflightOutcome | LiveCanaryAllowlistProbeOutcome> {
     const parameters = parseWorkflowParameters(event.payload);
-    const durableStep: DurableStep = {
-      do: step.do.bind(step) as unknown as DurableStep["do"],
-    };
+    const durableStep = step as unknown as DurableStep;
     if (parameters?.action === "preflight") return runLiveCanaryPreflight(this.env.KIRISAME, durableStep);
     if (parameters?.action === "allowlist-probe") {
       return runLiveCanaryAllowlistProbe(parameters.requestJson, this.env.KIRISAME, durableStep);
