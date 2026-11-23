@@ -1,16 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import branchPublicationRequest from "../contracts/valid/branch-publication-request.json";
 import publicationRequest from "../contracts/valid/pr-publication-request.json";
 import publicationResult from "../contracts/valid/successful-pr-result.json";
-import type { PublisherResponse } from "../../src/contracts/types.js";
+import type { PublicationRequest, PublisherResponse } from "../../src/contracts/types.js";
+import { canonicalizeJson } from "../../src/contracts/canonicalize.js";
+import { sha256Hex, utf8 } from "../../src/contracts/integrity.js";
+import { validateContract } from "../../src/contracts/validate.js";
 import { handleCanaryRequest } from "../../src/canary/harness.js";
 import { MAX_REQUEST_BODY_BYTES } from "../../src/entrypoints/publisher.js";
 
-const requestJson = JSON.stringify(publicationRequest.value);
+let requestJson: string;
 const enabled = {
   KIRISAME_CANARY_ENABLED: "true",
-  KIRISAME_CANARY_REPOSITORY: "cyanautomation/demo-app",
+  KIRISAME_CANARY_REPOSITORY: "CyanAutomation/somatic",
   KIRISAME_CANARY_BASE_REF: "main",
 };
+
+beforeAll(async () => {
+  requestJson = await makeCanaryRequest(publicationRequest.value as unknown as PublicationRequest);
+});
 
 describe("private canary harness", () => {
   it("calls the named publisher entrypoint twice with the identical authorized request", async () => {
@@ -83,6 +91,22 @@ describe("private canary harness", () => {
     expect(called).toBe(false);
   });
 
+  it("rejects branch mode and a non-main base before calling the publisher", async () => {
+    for (const request of [
+      await makeCanaryRequest(branchPublicationRequest.value as unknown as PublicationRequest),
+      await makeCanaryRequest(publicationRequest.value as unknown as PublicationRequest, { baseRef: "release" }),
+    ]) {
+      let called = false;
+      const response = await handleCanaryRequest(localRequest(request), {
+        ...enabled,
+        KIRISAME: { publish: async () => { called = true; return publicationResult.value as PublisherResponse; } },
+      });
+
+      expect(response.status).toBe(403);
+      expect(called).toBe(false);
+    }
+  });
+
   it("fails closed when the private publisher binding is not available", async () => {
     const response = await handleCanaryRequest(localRequest(requestJson), enabled);
 
@@ -118,4 +142,24 @@ describe("private canary harness", () => {
 
 function localRequest(body: string): Request {
   return new Request("http://127.0.0.1:5173/__canary/publish-replay", { method: "POST", body });
+}
+
+async function makeCanaryRequest(
+  source: PublicationRequest,
+  overrides: { baseRef?: string } = {},
+): Promise<string> {
+  const request = structuredClone(source);
+  const repository = { owner: "cyanautomation", name: "somatic" };
+  request.repository = repository;
+  request.artifact.repository = repository;
+  if (overrides.baseRef) {
+    request.baseRef = overrides.baseRef;
+    request.artifact.baseRef = overrides.baseRef;
+  }
+  const canonical = canonicalizeJson(request.artifact);
+  if (canonical === undefined) throw new Error("canary test artifact did not canonicalize");
+  request.artifactDigest = `sha256:${await sha256Hex(utf8(canonical))}`;
+  const validation = await validateContract("publication-request", request);
+  if (!validation.valid) throw new Error(JSON.stringify(validation.errors));
+  return JSON.stringify(request);
 }

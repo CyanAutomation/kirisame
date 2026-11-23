@@ -1,7 +1,7 @@
 import { bindings, defineConfig } from "cf/config";
 import * as entrypoint from "./src/index.ts" with { type: "cf-worker" };
 import * as canaryHarnessEntrypoint from "./src/canary/harness.ts" with { type: "cf-worker" };
-import { resolveCanarySettings } from "./src/publication/canary-settings.js";
+import { CANARY_PUBLISHER_BINDING, resolveCanarySettings } from "./src/publication/canary-settings.js";
 import { resolveWorkerSettings } from "./src/publication/worker-settings.js";
 
 const processEnvironment = (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env;
@@ -32,7 +32,7 @@ function workerEnvironment(settings: ReturnType<typeof resolveWorkerSettings>) {
       KIRISAME_CANARY_ENABLED: bindings.text(settings.canaryEnabled ? "true" : "false"),
       KIRISAME_CANARY_REPOSITORY: bindings.text(settings.canaryRepository),
       KIRISAME_CANARY_BASE_REF: bindings.text(settings.canaryBaseRef),
-      KIRISAME: bindings.worker({ worker: "kirisame-canary", exportName: "PublisherEntrypoint", dev: { remote: true } }),
+      KIRISAME: bindings.worker(CANARY_PUBLISHER_BINDING),
     };
   }
 

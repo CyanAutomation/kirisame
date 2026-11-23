@@ -1,6 +1,7 @@
 import { validateContract } from "../contracts/validate.js";
 import type { PublicationRequest, PublisherResponse } from "../contracts/types.js";
 import { MAX_REQUEST_BODY_BYTES } from "../entrypoints/publisher.js";
+import { CANARY_PUBLICATION_TARGET } from "../shared/canary-target.js";
 import { readLimitedBytes } from "../shared/streams.js";
 
 interface CanaryPublisherBinding {
@@ -77,10 +78,15 @@ async function parseCanaryRequest(request: Request): Promise<{ requestJson: stri
 function isWithinCanaryScope(publication: PublicationRequest, environment: ConfiguredCanaryEnvironment): boolean {
   const allowedRepository = environment.KIRISAME_CANARY_REPOSITORY;
   const [owner, name, extra] = allowedRepository.split("/");
-  return extra === undefined && Boolean(owner && name)
+  const expectedRepository = `${CANARY_PUBLICATION_TARGET.owner}/${CANARY_PUBLICATION_TARGET.repository}`;
+  return extra === undefined
+    && allowedRepository.toLowerCase() === expectedRepository.toLowerCase()
+    && environment.KIRISAME_CANARY_BASE_REF === CANARY_PUBLICATION_TARGET.baseRef
     && publication.mode === "pr"
+    && Boolean(owner && name)
+    && `${owner}/${name}`.toLowerCase() === expectedRepository.toLowerCase()
     && `${publication.repository.owner}/${publication.repository.name}`.toLowerCase() === allowedRepository.toLowerCase()
-    && publication.baseRef === environment.KIRISAME_CANARY_BASE_REF
+    && publication.baseRef === CANARY_PUBLICATION_TARGET.baseRef
     && publication.headRef === `kirisame/p/${publication.publicationId}`;
 }
 
