@@ -32,6 +32,10 @@ interface WorkflowParameters {
 interface DurableStep {
   do(
     name: string,
+    callback: () => Promise<CanaryAuthorizationResult>,
+  ): Promise<CanaryAuthorizationResult>;
+  do(
+    name: string,
     config: { retries: { limit: 0; delay: "1 second" } },
     callback: () => Promise<PublisherResponse>,
   ): Promise<PublisherResponse>;
@@ -97,7 +101,7 @@ export async function runLiveCanaryPreflight(
   step: DurableStep,
 ): Promise<LiveCanaryPreflightOutcome> {
   try {
-    return await step.do("github-app-installation-and-token-preflight", NO_AUTOMATIC_RETRIES, () =>
+    return await step.do("github-app-installation-and-token-preflight", () =>
       publisher.verifyCanaryAuthorization());
   } catch (error) {
     return {
