@@ -32,17 +32,17 @@ interface WorkflowParameters {
 interface DurableStep {
   do(
     name: string,
-    config: { retries: { limit: 0; delay: 0 } },
+    config: { retries: { limit: 0; delay: "1 second" } },
     callback: () => Promise<PublisherResponse>,
   ): Promise<PublisherResponse>;
   do(
     name: string,
-    config: { retries: { limit: 0; delay: 0 } },
+    config: { retries: { limit: 0; delay: "1 second" } },
     callback: () => Promise<CanaryAuthorizationResult>,
   ): Promise<CanaryAuthorizationResult>;
 }
 
-const NO_AUTOMATIC_RETRIES = { retries: { limit: 0, delay: 0 } } as const;
+const NO_AUTOMATIC_RETRIES = { retries: { limit: 0, delay: "1 second" } } as const;
 
 export type LiveCanaryOutcome =
   | { status: "rejected"; code: "CANARY_INVALID_REQUEST" | "CANARY_POLICY_DENIED" }

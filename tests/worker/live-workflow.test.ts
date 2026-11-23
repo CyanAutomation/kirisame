@@ -155,8 +155,8 @@ describe("deployed live canary workflow", () => {
     await runLiveCanary(requestJson, publisher, step);
 
     expect(configs).toEqual([
-      { retries: { limit: 0, delay: 0 } },
-      { retries: { limit: 0, delay: 0 } },
+      { retries: { limit: 0, delay: "1 second" } },
+      { retries: { limit: 0, delay: "1 second" } },
     ]);
   });
 
