@@ -30,6 +30,8 @@ interface WorkflowParameters {
 }
 
 interface DurableStep {
+  do(name: string, config: object, callback: () => Promise<{ status: "ready" }>): Promise<{ status: "ready" }>;
+  do(name: string, config: object, callback: () => Promise<CanaryAuthorizationStepResult>): Promise<CanaryAuthorizationStepResult>;
   do(name: string, callback: () => Promise<{ status: "ready" }>): Promise<{ status: "ready" }>;
   do(
     name: string,
@@ -111,8 +113,8 @@ export async function runLiveCanaryPreflight(
   step: DurableStep,
 ): Promise<LiveCanaryPreflightOutcome> {
   try {
-    await step.do("workflow-step-runtime-probe", async () => ({ status: "ready" }));
-    const result = await step.do("github-app-installation-and-token-preflight", async () => {
+    await step.do("workflow-step-runtime-probe", {}, async () => ({ status: "ready" }));
+    const result = await step.do("github-app-installation-and-token-preflight", {}, async () => {
       try {
         return { kind: "verified", result: await publisher.verifyCanaryAuthorization() } as const;
       } catch (error) {
