@@ -77,8 +77,17 @@ describe("deployed live canary workflow", () => {
       publish: vi.fn(async (): Promise<PublisherResponse> => liveResult()),
       verifyCanaryAuthorization: vi.fn(async () => preflight),
     };
+    const args: unknown[][] = [];
+    const step = {
+      do: async (...values: unknown[]) => {
+        args.push(values);
+        return await (values.at(-1) as () => Promise<typeof preflight>)();
+      },
+    } as unknown as Parameters<typeof runLiveCanaryPreflight>[1];
 
-    await expect(runLiveCanaryPreflight(publisher, directStep)).resolves.toEqual(preflight);
+    await expect(runLiveCanaryPreflight(publisher, step)).resolves.toEqual(preflight);
+    expect(args).toHaveLength(1);
+    expect(args[0]).toHaveLength(2);
     expect(publisher.verifyCanaryAuthorization).toHaveBeenCalledOnce();
     expect(publisher.publish).not.toHaveBeenCalled();
   });
@@ -233,7 +242,10 @@ describe("deployed live canary workflow", () => {
 });
 
 const directStep = {
-  do: async <T>(_name: string, _config: unknown, callback: () => Promise<T>): Promise<T> => callback(),
+  do: async <T>(_name: string, configOrCallback: unknown, configuredCallback?: () => Promise<T>): Promise<T> => {
+    const callback = configuredCallback ?? configOrCallback as () => Promise<T>;
+    return callback();
+  },
 };
 
 function liveResult(): PublicationResult {
