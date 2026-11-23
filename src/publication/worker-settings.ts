@@ -3,6 +3,7 @@ import type { CanarySettings } from "./canary-settings.js";
 export interface WorkerSettings {
   workerName: string;
   canaryHarness: boolean;
+  workflowInvoker: boolean;
   canaryEnabled: boolean;
   canaryRepository: string;
   canaryBaseRef: string;
@@ -21,10 +22,14 @@ export function resolveWorkerSettings(
 ): WorkerSettings {
   const canaryHarness = mode === "canary-harness";
   const canaryReceiver = mode === "canary-receiver";
+  const workflowInvoker = mode === "live-canary-invoker";
 
   return {
-    workerName: canaryHarness ? "kirisame-canary-harness" : canaryReceiver ? "kirisame-canary" : "kirisame",
+    workerName: canaryHarness ? "kirisame-canary-harness"
+      : canaryReceiver ? "kirisame-canary"
+        : workflowInvoker ? "kirisame-live-invoker" : "kirisame",
     canaryHarness,
+    workflowInvoker,
     canaryEnabled: canary.enabled,
     canaryRepository: canary.repository,
     canaryBaseRef: canary.baseRef,

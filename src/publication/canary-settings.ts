@@ -13,6 +13,29 @@ export const CANARY_PUBLISHER_BINDING = {
   dev: { remote: true },
 } as const;
 
+export const LIVE_CANARY_PUBLISHER_BINDING = {
+  worker: "kirisame",
+  exportName: "PublisherEntrypoint",
+} as const;
+
+export const LIVE_CANARY_WORKFLOW = {
+  name: "kirisame-live-invoker",
+  exportName: "LiveCanaryWorkflow",
+  maxSteps: 2,
+  concurrencyLimit: 1,
+  retention: "1 day",
+} as const;
+
+export const LIVE_CANARY_WORKER_EXPOSURE: {
+  workersDev: false;
+  previewUrls: false;
+  triggers: never[];
+} = {
+  workersDev: false,
+  previewUrls: false,
+  triggers: [],
+};
+
 export function resolveCanarySettings(environment: Record<string, string | undefined>): CanarySettings {
   const repository = environment.KIRISAME_CANARY_REPOSITORY?.trim() ?? "";
   const baseRef = environment.KIRISAME_CANARY_BASE_REF?.trim() ?? "";
