@@ -86,8 +86,11 @@ describe("deployed live canary workflow", () => {
     } as unknown as Parameters<typeof runLiveCanaryPreflight>[1];
 
     await expect(runLiveCanaryPreflight(publisher, step)).resolves.toEqual(preflight);
-    expect(args).toHaveLength(1);
-    expect(args[0]).toHaveLength(2);
+    expect(args.map((values) => values[0])).toEqual([
+      "workflow-step-runtime-probe",
+      "github-app-installation-and-token-preflight",
+    ]);
+    expect(args.every((values) => values.length === 2)).toBe(true);
     expect(publisher.verifyCanaryAuthorization).toHaveBeenCalledOnce();
     expect(publisher.publish).not.toHaveBeenCalled();
   });
