@@ -82,7 +82,10 @@ The follow-up preflight result includes a safe `failureStage` alongside the stab
 | `failureStage` | Meaning and next check |
 | --- | --- |
 | `configuration` | The App ID or private-key binding is missing or the non-secret configuration is invalid. Check the binding names and App ID in Cloudflare. |
-| `private_key_import` | The runtime could not parse/import the configured key. Keep the existing secret value private; use the Cloudflare secret-management flow to repair it only if its owner confirms the intended key. |
+| `private_key_pem_envelope` | The PEM header/footer is missing, mismatched, or has extra surrounding content. Verify the full, unencrypted `RSA PRIVATE KEY` or `PRIVATE KEY` envelope without sharing it. |
+| `private_key_pem_base64` | The PEM envelope is recognized, but its body is empty or not canonical base64. Verify the complete body was copied without redaction or literal ellipses. |
+| `private_key_crypto_import` | The PEM body decoded, but Web Crypto rejected the DER key. Verify that it is an unencrypted RSA PKCS#1 or PKCS#8 private key. |
+| `private_key_import` | Legacy result from deployments before the finer PEM/import diagnosis; it combined the three checks above. |
 | `github_app_signing` | The imported key could not sign an App JWT. Do not enable publishing; investigate the configured key/runtime compatibility without exposing the key. |
 | `installation_and_token_scope` | GitHub installation, permission, API, or scoped-token validation failed. Use the stable `code` to distinguish missing installation, denied permissions, rejected authentication, rate limiting, or an unavailable response. The adapter requests only `CyanAutomation/somatic` with contents and pull-request write permissions and validates that exact scope before returning success. |
 | `internal` | An unexpected preflight failure occurred outside the named checks. Keep publishing disabled and inspect sanitized runtime diagnostics. |

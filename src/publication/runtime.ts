@@ -1,6 +1,7 @@
 import { PublicationFailure } from "../errors/publication-error.js";
 import {
   createGitHubAppJwt,
+  diagnoseGitHubAppPrivateKey,
   importGitHubAppPrivateKey,
   type GitHubAppCredentials,
   validateGitHubAppCredentials,
@@ -57,10 +58,10 @@ export async function verifyCanaryRepositoryAuthorization(
     return { status: "rejected", code: "INTERNAL_ERROR", failureStage: "internal" };
   }
 
-  const keyImport = await runAuthorizationPreflightStage("private_key_import", async () => {
-    await importGitHubAppPrivateKey(credentials!.privateKey);
-  });
-  if (!keyImport.ok) return rejectedAuthorization(keyImport);
+  const keyImport = await diagnoseGitHubAppPrivateKey(credentials.privateKey);
+  if (!keyImport.ok) {
+    return { status: "rejected", code: "PUBLISHING_UNAVAILABLE", failureStage: keyImport.failureStage };
+  }
 
   const signing = await runAuthorizationPreflightStage("github_app_signing", async () => {
     await createGitHubAppJwt(credentials!);

@@ -5,7 +5,7 @@ import { runAuthorizationPreflightStage } from "../../src/publication/authorizat
 describe("authorization preflight stage primitive", () => {
   it("returns the safe publication code and stage without exception details", async () => {
     const secret = "credential-detail-must-not-escape";
-    const result = await runAuthorizationPreflightStage("private_key_import", async () => {
+    const result = await runAuthorizationPreflightStage("private_key_pem_base64", async () => {
       const error = new PublicationFailure("PUBLISHING_UNAVAILABLE");
       error.message = secret;
       throw error;
@@ -13,7 +13,7 @@ describe("authorization preflight stage primitive", () => {
 
     expect(result).toEqual({
       ok: false,
-      failureStage: "private_key_import",
+      failureStage: "private_key_pem_base64",
       code: "PUBLISHING_UNAVAILABLE",
     });
     expect(JSON.stringify(result)).not.toContain(secret);

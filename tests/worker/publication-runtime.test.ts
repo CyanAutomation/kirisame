@@ -67,7 +67,7 @@ describe("production publication configuration", () => {
     });
   });
 
-  it("reports configuration, key-import, and installation failures by stage", async () => {
+  it("reports configuration, key-format, and installation failures by stage", async () => {
     const { credentials } = await generateTestGitHubAppKeys();
     await expect(verifyCanaryRepositoryAuthorization({
       GITHUB_APP_ID: "wrong-app-id",
@@ -84,7 +84,7 @@ describe("production publication configuration", () => {
     })).resolves.toEqual({
       status: "rejected",
       code: "PUBLISHING_UNAVAILABLE",
-      failureStage: "private_key_import",
+      failureStage: "private_key_pem_envelope",
     });
 
     const responseDetail = "github-error-body-must-not-escape";

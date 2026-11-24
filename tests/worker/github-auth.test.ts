@@ -1,6 +1,11 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { utf8 } from "../../src/contracts/integrity.js";
-import { createGitHubAppJwt, importGitHubAppPrivateKey, validateGitHubAppCredentials } from "../../src/github/GitHubAppAuth.js";
+import {
+  createGitHubAppJwt,
+  diagnoseGitHubAppPrivateKey,
+  importGitHubAppPrivateKey,
+  validateGitHubAppCredentials,
+} from "../../src/github/GitHubAppAuth.js";
 import { generateTestGitHubAppKeys, decodeBase64Url, type TestGitHubAppKeys } from "./github-test-utils.js";
 
 let keys: TestGitHubAppKeys;
@@ -41,8 +46,22 @@ describe("GitHub App JWT signing", () => {
   it("imports both GitHub traditional RSA PEM and unencrypted PKCS#8 PEM keys", async () => {
     const pkcs1 = await importGitHubAppPrivateKey(keys.credentials.privateKey);
     const pkcs8 = await importGitHubAppPrivateKey(keys.pkcs8Pem);
+    const oneLinePkcs1 = keys.credentials.privateKey.replace(/\s+/gu, " ");
     expect(pkcs1.algorithm.name).toBe("RSASSA-PKCS1-v1_5");
     expect(pkcs8.algorithm.name).toBe("RSASSA-PKCS1-v1_5");
+    await expect(diagnoseGitHubAppPrivateKey(oneLinePkcs1)).resolves.toEqual({ ok: true });
+  });
+
+  it("diagnoses PEM envelope, base64 body, and Web Crypto import failures without key material", async () => {
+    await expect(diagnoseGitHubAppPrivateKey("malformed-key-material")).resolves.toEqual({
+      ok: false,
+      failureStage: "private_key_pem_envelope",
+    });
+    await expect(diagnoseGitHubAppPrivateKey("-----BEGIN RSA PRIVATE KEY-----\nabc$\n-----END RSA PRIVATE KEY-----"))
+      .resolves.toEqual({ ok: false, failureStage: "private_key_pem_base64" });
+    await expect(diagnoseGitHubAppPrivateKey("-----BEGIN RSA PRIVATE KEY-----\nYQ==\n-----END RSA PRIVATE KEY-----"))
+      .resolves.toEqual({ ok: false, failureStage: "private_key_crypto_import" });
+    await expect(diagnoseGitHubAppPrivateKey(keys.credentials.privateKey)).resolves.toEqual({ ok: true });
   });
 
   it("rejects missing, inconsistent, encrypted, and malformed signing configuration", async () => {
