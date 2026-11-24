@@ -106,6 +106,16 @@ After deployment, `/health` returned `200`, `/readyz` returned `503` with publis
 
 Follow-up validation passed: `npm ci`, `npm test` (44 contract and 212 Worker tests), `npm run typecheck`, `npm run lint`, `npm run build`, and `npm audit` (zero vulnerabilities). Fallow architecture reported zero issues; `fallow audit` remained advisory `warn` with zero dead-code issues and two moderate complexity findings in the overall PR diff.
 
+### PEM import and GitHub transport follow-up — 2026-11-24
+
+The key owner confirmed that Cloudflare holds the existing App key in an unencrypted RSA PKCS#1 PEM envelope. The safe preflight now distinguishes PEM-envelope, base64-body, and Web Crypto import failures. A one-line PEM with whitespace around or within the encoded body is covered by the Worker tests. The secret value was not read or changed.
+
+This diagnostic was deployed to the production `kirisame` Worker as version `0db1baff-315f-47d8-9d48-f0bf075ba4a9`, deployment `f6aaa2fd-57b3-474a-a9ca-4fccc3703771`, with 100% traffic and source `21b79030d123d0e6aabccb60f6bb1eb8bcc8c9e9`. Cloudflare confirmed that `GITHUB_APP_PRIVATE_KEY` remains a `secret_text` binding, `PUBLISHING_ENABLED=false`, `GITHUB_REPOSITORY_ALLOWLIST=[]`, and no Service Binding on the publisher. The private invoker still binds only to `kirisame.PublisherEntrypoint`; no Soyuz binding was added.
+
+Two private read-only preflights (`cf_fca310711e996f03f5e6bad87d14a2f3daf9752e97876681fdf5038a0c1558cc` and `cf_dda49a9ee3ecc59cd1db46b5ef97a81e7880d107e61c2e359f9af697d196d51f`) imported the key and signed the App JWT, then returned `{ status: "rejected", code: "GITHUB_UNAVAILABLE", failureStage: "installation_and_token_scope" }`. A sanitized `app_installation` Worker log had no HTTP status, which indicates that the fetch failed before an HTTP response was available; it does not identify the underlying transport cause. GitHub installation and repository-scoped token behavior therefore remain unverified. No write to Somatic—publication, replay, branch, commit, or PR—was attempted.
+
+Post-deployment checks returned `/health` 200, `/readyz` 503 with publishing unavailable, and both GET and forged-header POST to `/internal/v1/publications` 404. Keep the publishing gate closed and diagnose the failed outbound GitHub API fetch before retrying the authorization preflight or attempting the canary.
+
 ## PR replay identity
 
 GitHub PR identity is confirmed from the canonical repository, head/base refs, open state, canonical URL and the exact marker binding publication ID, run ID, artifact digest and complete request digest. Maintainers can edit the PR title and descriptive text while preserving that marker exactly once. Kirisame does not overwrite those edits. A missing, duplicated, changed or different-request marker, a repository/ref mismatch, or a closed/merged PR remains a conflict.
