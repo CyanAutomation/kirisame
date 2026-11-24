@@ -45,6 +45,14 @@ describe("Cloudflare worker settings", () => {
       publishingEnabled: false,
       repositoryAllowlist: "[]",
     });
+    expect(resolveWorkerSettings("production", canary, {
+      PUBLISHING_ENABLED: "true",
+      GITHUB_REPOSITORY_ALLOWLIST: '[{"owner":"CyanAutomation","repository":"somatic","operations":["pr"],"baseBranches":["main"]}]',
+    })).toMatchObject({
+      workerName: "kirisame",
+      publishingEnabled: true,
+      repositoryAllowlist: '[{"owner":"CyanAutomation","repository":"somatic","operations":["pr"],"baseBranches":["main"]}]',
+    });
   });
 
   it("configures the deployed live test invoker without enabling publisher settings", () => {

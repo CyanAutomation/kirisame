@@ -166,7 +166,14 @@ async function dispatchRepositoryRequest(
   const handlers = [
     () => handleGitRefRequest(suffix, request.method, request.body, repository, state),
     () => handleCommitRequest(suffix, request.method, request.body, repository, state),
-    () => handleTreeRequest(suffix, request.method, request.body, repository, state),
+    () => handleTreeRequest(
+      suffix,
+      request.method,
+      request.body,
+      repository,
+      state,
+      request.url.searchParams.get("recursive") === "1",
+    ),
     () => handleBlobRequest(suffix, request.method, request.body, repository, state),
     () => handlePullRequest(suffix, request.method, request.url, request.body, repository, state),
   ];
@@ -245,11 +252,13 @@ async function handleTreeRequest(
   body: Record<string, unknown>,
   repository: Repository,
   state: MockGitHubAdapter,
+  recursive: boolean,
 ): Promise<Response | undefined> {
   if (suffix.startsWith("git/trees/")) {
     const sha = suffix.slice("git/trees/".length);
     const entries = await state.readTree(repository, sha);
-    return json({ sha, truncated: false, tree: entries.filter((entry) => !entry.path.includes("/")) });
+    const tree = recursive ? entries : entries.filter((entry) => !entry.path.includes("/"));
+    return json({ sha, truncated: false, tree });
   }
   if (suffix !== "git/trees" || method !== "POST") return undefined;
   const updates = body.tree as Array<{ path: string; mode: "100644"; type: "blob"; sha: string | null }>;

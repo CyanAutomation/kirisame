@@ -323,23 +323,19 @@ describe("GitHub REST Git Data adapter", () => {
     expect(refRequest.url.pathname).toBe("/repos/CyanAutomation/demo-app/git/ref/heads/kirisame/p/019a6000-0000-7000-8000-000000000001");
   });
 
-  it("recursively retrieves nested tree objects and rejects truncated or malformed trees", async () => {
+  it("retrieves nested entries in one recursive request and rejects truncated or malformed trees", async () => {
     const root = "1".repeat(40);
     const nested = "2".repeat(40);
     const blob = "3".repeat(40);
     const fixture = createAdapterFixture({ apiHandler: async (url) => {
-      if (url.pathname.endsWith(`/git/trees/${root}`)) return json({
+      if (url.pathname.endsWith(`/git/trees/${root}`) && url.searchParams.get("recursive") === "1") return json({
         sha: root,
         truncated: false,
         tree: [
           { path: "docs", mode: "040000", type: "tree", sha: nested },
+          { path: "docs/guide.md", mode: "100644", type: "blob", sha: blob },
           { path: "README.md", mode: "100644", type: "blob", sha: blob },
         ],
-      });
-      if (url.pathname.endsWith(`/git/trees/${nested}`)) return json({
-        sha: nested,
-        truncated: false,
-        tree: [{ path: "guide.md", mode: "100644", type: "blob", sha: blob }],
       });
       return undefined;
     } });
@@ -349,6 +345,9 @@ describe("GitHub REST Git Data adapter", () => {
       { path: "docs/guide.md", mode: "100644", type: "blob", sha: blob },
       { path: "README.md", mode: "100644", type: "blob", sha: blob },
     ]));
+    const treeRequests = fixture.calls.filter(({ url }) => url.pathname.endsWith(`/git/trees/${root}`));
+    expect(treeRequests).toHaveLength(1);
+    expect(treeRequests[0]!.url.searchParams.get("recursive")).toBe("1");
 
     const truncated = createAdapterFixture({ apiHandler: async () => json({ sha: root, truncated: true, tree: [] }) });
     await truncated.adapter.resolveRepository(repository, "branch");
@@ -372,9 +371,28 @@ describe("GitHub REST Git Data adapter", () => {
     await expect(duplicateName.adapter.readTree(repository, root)).rejects.toMatchObject({ code: "UNSUPPORTED_GIT_OBJECT" });
   });
 
+  it("includes publication correlation IDs in GitHub API logs", async () => {
+    const logger = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const fixture = createAdapterFixture({ requestId: "request-123", publicationId: "publication-456" });
+      await fixture.adapter.resolveRepository(repository, "branch");
+      await fixture.adapter.readRef(repository, "main");
+
+      const apiLog = JSON.parse(String(logger.mock.calls.at(-1)?.[0])) as Record<string, unknown>;
+      expect(apiLog).toMatchObject({
+        operation: "github_api",
+        requestId: "request-123",
+        publicationId: "publication-456",
+        category: "git_reference",
+      });
+    } finally {
+      logger.mockRestore();
+    }
+  });
+
   it.each([
     { label: "missing name", entry: { mode: "100644", type: "blob", sha: "3".repeat(40) } },
-    { label: "nested name in one tree entry", entry: { path: "nested/file.txt", mode: "100644", type: "blob", sha: "3".repeat(40) } },
+    { label: "empty path segment", entry: { path: "nested//file.txt", mode: "100644", type: "blob", sha: "3".repeat(40) } },
     { label: "dot path segment", entry: { path: "..", mode: "100644", type: "blob", sha: "3".repeat(40) } },
     { label: "invalid object SHA", entry: { path: "file.txt", mode: "100644", type: "blob", sha: "invalid" } },
   ])("rejects a tree entry with a $label", async ({ entry }) => {
@@ -672,6 +690,8 @@ function createAdapterFixture(options: {
   tokenRepositories?: Array<{ id: unknown; fullName: unknown }>;
   apiHandler?: (url: URL, init: RequestInit | undefined) => Promise<Response | undefined>;
   requestTimeoutMs?: number;
+  requestId?: string;
+  publicationId?: string;
   onAuthorizationDiagnostic?: (step: string, status?: number) => void;
 } = {}) {
   const calls: Array<{ url: URL; init: RequestInit | undefined; headers: Headers; body?: string }> = [];
@@ -679,6 +699,8 @@ function createAdapterFixture(options: {
   const adapter = new RealGitHubAdapter(keys.credentials, {
     fetch: fetcher,
     now: () => now,
+    ...(options.requestId ? { requestId: options.requestId } : {}),
+    ...(options.publicationId ? { publicationId: options.publicationId } : {}),
     ...(options.onAuthorizationDiagnostic ? { onAuthorizationDiagnostic: options.onAuthorizationDiagnostic } : {}),
     ...(options.requestTimeoutMs !== undefined ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
   });

@@ -18,9 +18,9 @@ import {
 import { utf8 } from "../contracts/integrity.js";
 
 export const MAX_REQUEST_BODY_BYTES = 9 * 1024 * 1024;
-type Publish = (request: PublicationRequest) => Promise<PublicationResult>;
+type Publish = (request: PublicationRequest, requestId: string) => Promise<PublicationResult>;
 
-/** Private typed-RPC entrypoint. Production publishing is explicitly unavailable in this phase. */
+/** Private typed-RPC entrypoint. Publishing is configuration-gated and is never exposed through public HTTP. */
 export class PublisherEntrypoint extends WorkerEntrypoint {
   // fallow-ignore-next-line unused-class-member -- Invoked by a private Cloudflare Worker Service Binding.
   async verifyCanaryAuthorization(): Promise<CanaryAuthorizationResult> {
@@ -37,9 +37,12 @@ export class PublisherEntrypoint extends WorkerEntrypoint {
 
   async publish(requestJson: string): Promise<PublisherResponse> {
     const environment = this.env as unknown as PublisherRuntimeEnvironment;
-    return handlePublisherJson(requestJson, async (request) => {
+    return handlePublisherJson(requestJson, async (request, requestId) => {
       if (environment.PUBLISHING_ENABLED !== "true") return unavailableResult(request);
-      const service = await createProductionPublicationService(environment);
+      const service = await createProductionPublicationService(environment, {
+        requestId,
+        publicationId: request.publicationId,
+      });
       return service.publish(request);
     });
   }
@@ -56,7 +59,7 @@ export async function handlePublisherJson(
   if (isPublicationError(value)) return value;
   const application = publicationFunction(publish);
   try {
-    const result = await application(value);
+    const result = await application(value, requestId);
     logPublicationSuccess(result, requestId, startedAt);
     return result;
   } catch (error) {
