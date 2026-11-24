@@ -616,11 +616,23 @@ describe("GitHub REST Git Data adapter", () => {
       .rejects.toMatchObject({ code: "BASE_TREE_CONFLICT" });
   });
 
-  it("does not follow API redirects and bounds malformed or oversized responses", async () => {
+  it("does not follow API redirects, records only their status, and bounds malformed or oversized responses", async () => {
     const redirect = createAdapterFixture({ apiHandler: async () => new Response(null, { status: 302, headers: { location: "https://evil.example" } }) });
     await redirect.adapter.resolveRepository(repository, "branch");
-    await expect(redirect.adapter.readRef(repository, "main")).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
-    expect(redirect.calls.at(-1)?.init?.redirect).toBe("error");
+    const logger = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      await expect(redirect.adapter.readRef(repository, "main")).rejects.toMatchObject({ code: "GITHUB_UNAVAILABLE" });
+      expect(redirect.calls.at(-1)?.init?.redirect).toBe("manual");
+      const logLine = String(logger.mock.calls.at(-1)?.[0]);
+      expect(JSON.parse(logLine)).toMatchObject({
+        category: "git_reference",
+        httpStatus: 302,
+        outcome: "GITHUB_UNAVAILABLE",
+      });
+      expect(logLine).not.toContain("evil.example");
+    } finally {
+      logger.mockRestore();
+    }
 
     const malformed = createAdapterFixture({ apiHandler: async () => new Response("not-json", { status: 200 }) });
     await malformed.adapter.resolveRepository(repository, "branch");

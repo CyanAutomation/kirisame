@@ -1,4 +1,5 @@
 import { bytesToBase64, canonicalBase64ToBytes, utf8 } from "../contracts/integrity.js";
+import type { GitHubAppPrivateKeyImportFailureStage } from "../contracts/types.js";
 import { PublicationFailure } from "../errors/publication-error.js";
 
 const KIRISAME_GITHUB_APP_ID = "3345400";
@@ -46,11 +47,31 @@ export async function createGitHubAppJwt(
 }
 
 export async function importGitHubAppPrivateKey(pem: string): Promise<CryptoKey> {
-  const match = /^-----BEGIN (RSA PRIVATE KEY|PRIVATE KEY)-----\s+([A-Za-z0-9+/=\r\n]+)\s+-----END \1-----\s*$/.exec(pem.trim());
-  if (!match) throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
+  const result = await importGitHubAppPrivateKeyMaterial(pem);
+  if (!result.ok) throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
+  return result.key;
+}
+
+/** Safe format/import diagnosis that never returns PEM text, DER bytes, or Web Crypto errors. */
+export async function diagnoseGitHubAppPrivateKey(
+  pem: string,
+): Promise<{ ok: true } | { ok: false; failureStage: GitHubAppPrivateKeyImportFailureStage }> {
+  const result = await importGitHubAppPrivateKeyMaterial(pem);
+  return result.ok ? { ok: true } : { ok: false, failureStage: result.failureStage };
+}
+
+async function importGitHubAppPrivateKeyMaterial(
+  pem: string,
+): Promise<
+  | { ok: true; key: CryptoKey }
+  | { ok: false; failureStage: GitHubAppPrivateKeyImportFailureStage }
+> {
+  const match = /^-----BEGIN (RSA PRIVATE KEY|PRIVATE KEY)-----([\s\S]*?)-----END \1-----$/.exec(pem.trim());
+  if (!match) return { ok: false, failureStage: "private_key_pem_envelope" };
   const encoded = match[2]!.replace(/\s+/gu, "");
+  if (!encoded) return { ok: false, failureStage: "private_key_pem_base64" };
   const der = canonicalBase64ToBytes(encoded);
-  if (!der) throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
+  if (!der) return { ok: false, failureStage: "private_key_pem_base64" };
   const keyBytes = match[1] === "RSA PRIVATE KEY" ? wrapPkcs1AsPkcs8(der) : der;
   try {
     const key = await crypto.subtle.importKey(
@@ -61,9 +82,9 @@ export async function importGitHubAppPrivateKey(pem: string): Promise<CryptoKey>
       ["sign"],
     );
     await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new Uint8Array([0]));
-    return key;
+    return { ok: true, key };
   } catch {
-    throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
+    return { ok: false, failureStage: "private_key_crypto_import" };
   }
 }
 

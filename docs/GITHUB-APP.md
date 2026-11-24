@@ -62,17 +62,17 @@ Normal CI exercises signing and HTTP behavior using ephemeral keys and mocked Gi
 
 ## Authorised canary procedure
 
-Do not select a repository automatically. A user or repository owner must explicitly identify a disposable test repository and authorize its use. Do not use production Soyuz to start the test.
+The approved Phase 2A.2 target is `CyanAutomation/somatic` with base branch `main`. Do not infer or substitute another repository or branch. Do not use production Soyuz to start the test.
 
-1. Confirm the approved disposable repository, its base branch, and that the Kirisame App is installed only on that repository.
-2. Build the separate `kirisame-canary` receiver with `npm run build -- --mode canary-receiver`. It remains disabled with an empty allowlist unless `KIRISAME_CANARY_ENABLED=true`, `KIRISAME_CANARY_REPOSITORY=owner/repo`, and `KIRISAME_CANARY_BASE_REF=branch` are explicitly provided. Its allowlist permits only PR mode to that single repository and base branch. Store the existing App key as a Worker secret only after approval, then deploy that mode only as part of the approved canary procedure.
-3. Use `npm run dev -- --mode canary-harness` for local development. Its `KIRISAME` binding explicitly targets the `PublisherEntrypoint` export on `kirisame-canary`; the local `/__canary/publish-replay` route accepts loopback requests only. It is not an internet publishing route and must not be deployed.
-4. Send one valid v1 PR request to the local harness. The harness validates the repository, base branch and deterministic head, invokes the private entrypoint once, and then sends the exact same JSON again only after the first response confirms an open PR.
-5. Confirm the branch, commit parent/tree, App author identity, PR head/base/marker, and that the replay reports the same branch and PR. The harness does not log request bodies or credentials.
-6. Verify an unrelated repository/base is rejected before any publisher call, the public production publishing route remains inaccessible, and diagnostics contain no credentials or file contents.
-7. Record the approved repository, branch, commit, PR URL, and sanitized result. Do not merge, close, or delete the test PR automatically.
+1. Confirm the approved repository and base branch, and independently verify the Kirisame App installation and required repository permissions before enabling publication.
+2. Use the existing `kirisame` Worker and its existing Cloudflare private-key secret. Do not deploy `kirisame-canary` as a publisher or copy credentials into the harness.
+3. Use `npm run dev -- --mode canary-harness` for the local-only harness. Its remote Service Binding targets the `PublisherEntrypoint` export on `kirisame`; the `/__canary/publish-replay` route accepts loopback requests only and is not a public publishing route.
+4. Temporarily set the Worker's publishing flag and exact single-repository/base-branch PR allowlist through Cloudflare only after source, permissions, token scope and public-route isolation are verified. Prepare one valid v1 PR request, invoke it through the local harness, and replay the exact same JSON only after the first response confirms an open PR.
+5. Independently confirm the branch, commit parent/tree, App author identity, PR head/base/marker, and that replay returned the same branch, commit and PR without another mutation.
+6. Verify an unauthorized repository is denied before authentication or mutation, the public production publishing route remains inaccessible, and diagnostics contain no credentials or file contents.
+7. Immediately restore `PUBLISHING_ENABLED=false` and `GITHUB_REPOSITORY_ALLOWLIST=[]`, verify the Cloudflare settings and public diagnostics, then record the sanitized GitHub and Cloudflare evidence. Leave the test PR open.
 
-The canary was not run as part of this implementation because no disposable repository or private key was supplied. Do not broaden the allowlist or create credentials to make the test pass.
+Do not run the canary if App installation, permissions, repository-scoped token behavior, private binding or safe rollback cannot be verified. Do not broaden the allowlist or copy credentials into another service to get around a missing prerequisite.
 
 ## Troubleshooting
 

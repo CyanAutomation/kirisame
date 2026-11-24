@@ -139,3 +139,23 @@ export interface ValidationResult {
 }
 
 export type PublisherResponse = PublicationResult | PublicationError;
+
+export type GitHubAppPrivateKeyImportFailureStage =
+  | "private_key_pem_envelope"
+  | "private_key_pem_base64"
+  | "private_key_crypto_import";
+
+export type CanaryAuthorizationFailureStage =
+  | "configuration"
+  | GitHubAppPrivateKeyImportFailureStage
+  | "github_app_signing"
+  | "installation_and_token_scope"
+  | "internal";
+
+export type CanaryAuthorizationResult =
+  | { status: "verified"; repository: "CyanAutomation/somatic" }
+  | {
+    status: "rejected";
+    code: PublicationErrorCode;
+    failureStage: CanaryAuthorizationFailureStage;
+  };

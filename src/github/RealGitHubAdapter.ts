@@ -433,7 +433,9 @@ async function fetchGitHubResponse(
       method: options.method ?? "GET",
       headers,
       ...(body !== undefined ? { body } : {}),
-      redirect: "error",
+      // Keep redirects visible for safe status telemetry, but never forward the App
+      // JWT or installation token to another host.
+      redirect: "manual",
       signal,
     });
   } catch {

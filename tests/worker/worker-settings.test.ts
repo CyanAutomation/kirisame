@@ -1,12 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { resolveWorkerSettings } from "../../src/publication/worker-settings.js";
-import { resolveCanarySettings } from "../../src/publication/canary-settings.js";
+import {
+  CANARY_PUBLISHER_BINDING,
+  LIVE_CANARY_PUBLISHER_BINDING,
+  LIVE_CANARY_WORKER_EXPOSURE,
+  LIVE_CANARY_WORKFLOW,
+  resolveCanarySettings,
+} from "../../src/publication/canary-settings.js";
 
 describe("Cloudflare worker settings", () => {
   const canary = resolveCanarySettings({
     KIRISAME_CANARY_ENABLED: "true",
-    KIRISAME_CANARY_REPOSITORY: "CyanAutomation/demo-app",
+    KIRISAME_CANARY_REPOSITORY: "CyanAutomation/somatic",
     KIRISAME_CANARY_BASE_REF: "main",
+  });
+
+  it("keeps the local canary on the existing private production publisher binding", () => {
+    expect(CANARY_PUBLISHER_BINDING).toEqual({
+      worker: "kirisame",
+      exportName: "PublisherEntrypoint",
+      dev: { remote: true },
+    });
   });
 
   it("keeps the canary harness isolated from publication receiver settings", () => {
@@ -30,6 +44,35 @@ describe("Cloudflare worker settings", () => {
       workerName: "kirisame",
       publishingEnabled: false,
       repositoryAllowlist: "[]",
+    });
+  });
+
+  it("configures the deployed live test invoker without enabling publisher settings", () => {
+    expect(resolveWorkerSettings("live-canary-invoker", canary, {})).toMatchObject({
+      workerName: "kirisame-live-invoker",
+      canaryHarness: false,
+      workflowInvoker: true,
+      publishingEnabled: false,
+      repositoryAllowlist: "[]",
+    });
+  });
+
+  it("uses a private, unscheduled Workflow with only a production Kirisame Service Binding", () => {
+    expect(LIVE_CANARY_PUBLISHER_BINDING).toEqual({
+      worker: "kirisame",
+      exportName: "PublisherEntrypoint",
+    });
+    expect(LIVE_CANARY_WORKFLOW).toEqual({
+      name: "kirisame-live-invoker",
+      exportName: "LiveCanaryWorkflow",
+      maxSteps: 2,
+      concurrencyLimit: 1,
+      retention: "1 day",
+    });
+    expect(LIVE_CANARY_WORKER_EXPOSURE).toEqual({
+      workersDev: false,
+      previewUrls: false,
+      triggers: [],
     });
   });
 
