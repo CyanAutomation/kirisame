@@ -42,7 +42,7 @@ The runtime signs RS256 App JWTs with `iat` 60 seconds in the past and an expiry
 A repository is publishable only when both conditions hold:
 
 1. The GitHub App installation has access to that repository.
-2. Kirisame's own explicit allowlist authorizes that exact lower-case owner/name and the requested branch/PR operation.
+2. Kirisame's own explicit allowlist authorizes the exact owner/repository identity and the requested branch/PR operation. Owner and repository names are compared case-insensitively after normalization to lowercase.
 
 Installation does not imply Kirisame policy authorization. Kirisame does not infer permission from a request's repository field, from a caller-selected installation ID, or from the presence of a working token. Resolve the installation from the configured App and exact repository after allowlist validation. `GITHUB_REPOSITORY_ALLOWLIST` is strict JSON with entries containing exactly `owner`, `repository`, `operations`, and `baseBranches`; wildcards and extra fields are rejected. See [GitHub App setup](GITHUB-APP.md) for an example.
 
