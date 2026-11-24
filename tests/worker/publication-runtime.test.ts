@@ -119,7 +119,7 @@ describe("production publication configuration", () => {
 
     expect(result).toEqual({
       status: "rejected",
-      code: "GITHUB_AUTH_INVALID",
+      code: "GITHUB_UNAVAILABLE",
       failureStage: "installation_and_token_scope",
       diagnostic: { step: "token_validation", httpStatus: 201 },
     });
