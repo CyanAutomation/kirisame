@@ -87,9 +87,14 @@ export async function verifyCanaryRepositoryAuthorization(
 
 function rejectedAuthorization(
   result: Exclude<Awaited<ReturnType<typeof runAuthorizationPreflightStage>>, { ok: true }>,
-  diagnostic: { step: CanaryAuthorizationDiagnosticStep; httpStatus?: number } = { step: "installation_lookup" },
+  diagnostic?: { step: CanaryAuthorizationDiagnosticStep; httpStatus?: number },
 ): CanaryAuthorizationResult {
-  return { status: "rejected", code: result.code, failureStage: result.failureStage, diagnostic };
+  return {
+    status: "rejected",
+    code: result.code,
+    failureStage: result.failureStage,
+    ...(diagnostic ? { diagnostic } : {}),
+  };
 }
 
 export async function isProductionPublishingConfigured(environment: unknown): Promise<boolean> {
