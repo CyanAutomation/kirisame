@@ -22,7 +22,7 @@ Phase 0.1 contract hardening, Phase 1 Worker foundations, Phase 1.1 publication 
 
 The Worker is named `kirisame`, targets account `c40f3cb30efbf8c6d081cf9e50a61931`, and uses `https://kirisame.scheimann.workers.dev/`. Configuration is in [cloudflare.config.ts](../cloudflare.config.ts). The checked-in settings explicitly disable publishing, set App ID `3345400`, leave the optional Client ID empty, declare the App key as a secret binding, and set the allowlist to `[]`.
 
-The public Worker reports publishing unavailable unless the commissioning gate and configuration are valid. Readiness validates configuration only; it does not contact GitHub or prove that an installation is usable. The named publisher uses the real adapter only when explicitly enabled and never falls back to the mock. No App key, installation, allowlisted repository, storage resource, or production Service Binding is configured by this phase.
+The public Worker reports publishing unavailable unless the commissioning gate and configuration are valid. Readiness validates configuration only; it does not contact GitHub or prove that an installation is usable. The named publisher uses the real adapter only when explicitly enabled and never falls back to the mock. Production has an existing App key secret binding and App installation; publishing remains disabled with an empty allowlist, and no storage resource or Soyuz Service Binding is configured.
 
 See [Operations](OPERATIONS.md) for local commands, deployment preflight, diagnostics, and rollback. A future Soyuz binding is named `KIRISAME`; the public URL is not the integration endpoint.
 
@@ -47,9 +47,9 @@ For every valid request, the application validates the contract, provenance, art
 
 ## Outstanding before live publication
 
-- Select an explicitly approved disposable canary repository and install the existing Kirisame App only on that repository.
-- Provision the private key as a Cloudflare Worker secret in an isolated, private-only canary environment; verify the installation and exact App permissions.
-- Enable a repository allowlist only for the approved canary, keep the production flag false, and run the live canary described in [GitHub App setup](GITHUB-APP.md).
+- Use the approved Phase 2A.2 target `CyanAutomation/somatic` with base `main`; the App owner accepts the current all-repositories installation and App permission levels for this commissioning.
+- Use the existing `kirisame` production Worker and existing Cloudflare private-key secret; keep the secret value in Cloudflare.
+- Require a positive private authorization preflight, then temporarily enable the exact Somatic PR allowlist for the live canary. Restore `PUBLISHING_ENABLED=false` and `GITHUB_REPOSITORY_ALLOWLIST=[]` immediately afterward.
 - Add a Soyuz publication ledger with a unique `publicationId`, immutable request fingerprint, claim/attempt fencing, retry time, outcome history, and artifact-retention pin.
 - Record and verify trusted execution completion and validation evidence before dispatch; a caller-supplied boolean is not authorization.
 - Produce the v1 immutable manifest in the executor and bind it to the canonical run and current claim fence.

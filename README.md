@@ -64,9 +64,9 @@ Kirisame must not become a general-purpose remote Git command execution service.
 
 ## Intended GitHub authentication
 
-The Worker contains a Workers-compatible GitHub App authenticator and real GitHub REST adapter. Publishing remains disabled by default. No private key, installation, allowlist entry, or Soyuz Service Binding is configured in the checked-in deployment settings.
+The Worker contains a Workers-compatible GitHub App authenticator and real GitHub REST adapter. Publishing remains disabled by default. The production Worker has the existing App private key as a Cloudflare secret binding, and the App is installed on `CyanAutomation/somatic`; no private key value is stored in the repository. The production allowlist remains empty and no Soyuz Service Binding is configured.
 
-When production publishing is implemented, Kirisame will use the dedicated GitHub App.
+For each authorized publication, Kirisame uses the dedicated GitHub App.
 
 | Property | Value |
 |---|---|
@@ -75,7 +75,7 @@ When production publishing is implemented, Kirisame will use the dedicated GitHu
 | App ID | `3345400` |
 | Authentication | GitHub App installation access tokens |
 | Credential storage | Cloudflare Worker secrets |
-| Intended installation scope | Explicitly authorised repositories |
+| Current installation scope | All repositories, accepted by the App owner for commissioning; Kirisame still applies its exact allowlist and repository-scoped token |
 
 ### Authentication flow
 
@@ -95,19 +95,22 @@ The GitHub App OAuth Client ID is not required for this machine-to-machine authe
 
 ### Required GitHub permissions
 
-The initial GitHub App permission requirements are expected to include:
+The current App permissions are:
 
 | Permission | Level | Purpose |
 |---|---|---|
 | Metadata | Read | Repository and installation identification |
+| Actions | Read | Existing owner-approved grant; not requested by Kirisame's publication token |
+| Checks | Read and write | Existing owner-approved grant; not requested by Kirisame's publication token |
 | Contents | Read and write | Create Git objects, commits and branch references |
+| Commit statuses | Read and write | Existing owner-approved grant; not requested by Kirisame's publication token |
 | Pull requests | Read and write | Create and reconcile pull requests |
 
-Additional permissions must be introduced only when a specific feature requires them.
+The App owner accepts these current grants for commissioning. Kirisame's runtime still requests and validates only the permissions needed for the selected operation, plus Metadata read, and scopes the token to exactly one repository.
 
 Kirisame must not request repository administration privileges or permissions to manage GitHub Actions workflows as part of its initial scope.
 
-The App should be installed only on explicitly selected repositories.
+The current all-repositories installation is accepted by the App owner for this commissioning. Kirisame's exact allowlist and per-operation, single-repository installation token remain required authorization gates.
 
 ## Publication contract
 
@@ -364,8 +367,8 @@ New consumers should integrate through an authorised control-plane interface rat
 - **Implemented:** Installation lookup, exact-repository and minimum-permission token scoping, expiry checks and fail-closed configuration.
 - **Implemented:** Real GitHub REST Git Data and Pull Requests adapter with bounded requests, tree traversal, pagination, error classification and reconciliation.
 - **Implemented:** Injected-HTTP tests that drive the real publication service through simulated GitHub endpoints.
-- **Pending:** Authorised live canary against a disposable, approved repository and private deployment.
-- **Pending:** Configure the real App secret and installation; keep writes disabled by default.
+- **Pending:** Complete the authorised live canary against `CyanAutomation/somatic` after a positive private authorization preflight.
+- **Implemented:** Configure the existing App secret binding and installation; production writes remain disabled by default.
 
 ### Phase 3 — Soyuz integration
 
