@@ -50,6 +50,20 @@ describe("GitHub App installation token scope", () => {
     expect(body).toEqual({ repositories: ["demo-app"], permissions: { contents: "write", pull_requests: "write" } });
   });
 
+  it("does not emit authorization diagnostics for ordinary repository requests", async () => {
+    const diagnostics: Array<{ step: string; status?: number }> = [];
+    const fixture = createAdapterFixture({
+      onAuthorizationDiagnostic: (step, status) => diagnostics.push({ step, ...(status !== undefined ? { status } : {}) }),
+    });
+    await fixture.adapter.resolveRepository(repository, "branch");
+    const afterAuthorization = diagnostics.length;
+
+    await fixture.adapter.readRef(repository, "main");
+
+    expect(afterAuthorization).toBeGreaterThan(0);
+    expect(diagnostics).toHaveLength(afterAuthorization);
+  });
+
   it("rejects a missing or suspended installation before token issuance", async () => {
     const missing = createAdapterFixture({ installationStatus: 404 });
     await expect(missing.adapter.resolveRepository(repository, "pr"))
@@ -658,12 +672,14 @@ function createAdapterFixture(options: {
   tokenRepositories?: Array<{ id: unknown; fullName: unknown }>;
   apiHandler?: (url: URL, init: RequestInit | undefined) => Promise<Response | undefined>;
   requestTimeoutMs?: number;
+  onAuthorizationDiagnostic?: (step: string, status?: number) => void;
 } = {}) {
   const calls: Array<{ url: URL; init: RequestInit | undefined; headers: Headers; body?: string }> = [];
   const fetcher = createFixtureFetcher(calls, options);
   const adapter = new RealGitHubAdapter(keys.credentials, {
     fetch: fetcher,
     now: () => now,
+    ...(options.onAuthorizationDiagnostic ? { onAuthorizationDiagnostic: options.onAuthorizationDiagnostic } : {}),
     ...(options.requestTimeoutMs !== undefined ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
   });
   return { adapter, calls };
