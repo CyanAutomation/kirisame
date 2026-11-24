@@ -93,6 +93,16 @@ GitHub independently shows no `kirisame/p/01a20a97-3e74-7e45-88fb-f29ec304a6e2` 
 
 The repository checks passed: `npm ci`, `npm test` (44 contract and 207 Worker tests), `npm run typecheck`, `npm run lint`, live-invoker build, and `npm audit` (zero vulnerabilities). `fallow audit` returned `warn` for introduced test/config complexity and a documented private-entrypoint suppression; it reported zero dead-code issues and did not fail the gate. The safe failure result is documented in Kirisame PR #7. Retry only after the generic `PUBLISHING_UNAVAILABLE` result has been resolved and a positive read-only preflight verifies the exact Somatic installation permissions and token scope. Do not enable publishing until then.
 
+### Staged preflight follow-up — 2026-11-24
+
+The staged authorization diagnostic was added in commit `d3aecbc96731786b44f6f9300467e7b323428ea7` and deployed to the existing production `kirisame` Worker as version `0293cc9e-3ba7-4524-ad1e-52c8cbace2a9`, deployment `ff21a4f4-5f93-4dad-b045-48198e9fcea2` (100% traffic). Cloudflare confirmed `KIRISAME_SOURCE_SHA` matches the commit, `GITHUB_APP_PRIVATE_KEY` remains a `secret_text` binding, `PUBLISHING_ENABLED=false`, and `GITHUB_REPOSITORY_ALLOWLIST=[]`. The secret value was neither read nor replaced.
+
+The deployed private invoker's authorization preflight returned `{ status: "rejected", code: "PUBLISHING_UNAVAILABLE", failureStage: "private_key_import" }` (Workflow instance `cf_7987b65adc9d7fbf8fc5bc2ba754219a10e62e8bbea6dbae43ce6c0c954eb049`). Configuration validation passed, but the Worker could not parse/import the bound key. This does not verify GitHub installation permissions or token scope. No publication or replay was attempted, and no Somatic branch, commit or PR was created.
+
+After deployment, `/health` returned `200`, `/readyz` returned `503` with publishing unavailable, and both GET and a forged-header POST to `/internal/v1/publications` returned `404`. The safe flags, secret binding, and absence of a Soyuz binding were verified again. Stop here until the authorized key owner confirms that Cloudflare holds the existing Kirisame App key in a supported PEM format; do not expose, regenerate, or rotate the key. After that owner-controlled correction, rerun the private read-only preflight and continue only if it returns `verified` for Somatic.
+
+Follow-up validation passed: `npm ci`, `npm test` (44 contract and 212 Worker tests), `npm run typecheck`, `npm run lint`, `npm run build`, and `npm audit` (zero vulnerabilities). Fallow architecture reported zero issues; `fallow audit` remained advisory `warn` with zero dead-code issues and two moderate complexity findings in the overall PR diff.
+
 ## PR replay identity
 
 GitHub PR identity is confirmed from the canonical repository, head/base refs, open state, canonical URL and the exact marker binding publication ID, run ID, artifact digest and complete request digest. Maintainers can edit the PR title and descriptive text while preserving that marker exactly once. Kirisame does not overwrite those edits. A missing, duplicated, changed or different-request marker, a repository/ref mismatch, or a closed/merged PR remains a conflict.
