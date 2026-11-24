@@ -1,6 +1,6 @@
 # Security policy
 
-Kirisame is the GitHub write boundary. Phase 0.1 contracts, Phase 1.1 hardening, and Phase 2A GitHub App authentication and real REST adapter are implemented. Production publishing remains disabled by the checked-in `PUBLISHING_ENABLED=false` setting and empty repository allowlist. No App key, installation, approved repository, or Soyuz Service Binding is configured. The named publisher therefore returns `PUBLISHING_UNAVAILABLE` for valid requests.
+Kirisame is the GitHub write boundary. Phase 0.1 contracts, Phase 1.1 hardening, and Phase 2A GitHub App authentication and real REST adapter are implemented. The production Worker has an existing App key secret binding, and the App is installed on `CyanAutomation/somatic`; the App owner accepts the current all-repositories installation and permission levels for commissioning. Production publishing remains disabled (`PUBLISHING_ENABLED=false`) with an empty repository allowlist, and no Soyuz Service Binding is configured. The named publisher therefore returns `PUBLISHING_UNAVAILABLE` for valid requests.
 
 ## GitHub App identity and permissions
 
@@ -9,7 +9,10 @@ The intended machine identity is the existing Kirisame GitHub App owned by CyanA
 | GitHub App repository permission | Level | Use |
 | --- | --- | --- |
 | Metadata | Read | Identify a repository and installation. GitHub requires metadata read access for repository operations. |
+| Actions | Read | Existing grant accepted by the App owner; not requested by Kirisame's publication token. |
+| Checks | Read and write | Existing grant accepted by the App owner; not requested by Kirisame's publication token. |
 | Contents | Read and write | Read a base commit/tree; create blobs, trees and commits; create a publication branch. |
+| Commit statuses | Read and write | Existing grant accepted by the App owner; not requested by Kirisame's publication token. |
 | Pull requests | Read and write | Find, create and reconcile pull requests for PR mode. |
 
 The GitHub Git Trees and Git Commits endpoints require Contents write; creating a pull request requires Pull requests write. Editing GitHub Actions workflow files requires a separate Workflows permission, which is outside v1. Kirisame must reject changes under .github/workflows rather than request that permission. Verify endpoint permissions against [GitHub's permission guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app), [Git Trees API](https://docs.github.com/en/rest/git/trees), [Git Commits API](https://docs.github.com/en/rest/git/commits), and [Pull Requests API](https://docs.github.com/en/rest/pulls/pulls).
@@ -20,13 +23,13 @@ The App private key belongs only in Kirisame's trusted Worker secret configurati
 
 ### GitHub App configuration review checklist
 
-The implementation is ready for configuration review, but no GitHub App setting or credential has been changed for this phase.
+The GitHub App settings were reviewed on 2026-11-24. The App owner accepts the current all-repositories installation and the permissions listed above for the Phase 2A.2 commissioning; no GitHub App setting change is required for this canary.
 
 - Confirm the App identity is Kirisame, owner CyanAutomation, App ID 3345400.
-- Set only Metadata read, Contents read/write, and Pull requests read/write.
-- Leave Workflows, Administration, Actions, secrets, checks, deployments, and organization permissions unset.
-- Configure installation access for selected repositories only; do not install on all repositories by default.
-- Review each installation's repository selection against the Kirisame repository allowlist.
+- Keep the current grants: Metadata read, Actions read, Checks read/write, Contents read/write, Commit statuses read/write, and Pull requests read/write.
+- Keep the current installation selection of all repositories for this commissioning; the App owner has accepted it.
+- Continue to enforce Kirisame's exact repository allowlist and request installation tokens for exactly the authorized repository with only operation-specific permissions plus Metadata read.
+- Do not add Workflows, Administration, secrets, deployments, or organization permissions.
 - Do not configure a user OAuth flow or rely on the OAuth Client ID for machine authentication.
 - Store the private key only as a Kirisame Worker secret; define a reviewed rotation and revocation procedure before production use.
 - Confirm no webhook is required for v1. If a future webhook is added, define its signature verification and replay rules separately.

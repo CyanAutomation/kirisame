@@ -2,7 +2,7 @@
 
 ## Current state
 
-Kirisame uses the existing CyanAutomation GitHub App, App ID `3345400`. The code implements App JWT signing, installation resolution, repository-scoped token issuance, and the GitHub Git Data and Pull Requests APIs. No App key, installation, repository allowlist entry, live canary, or Soyuz Service Binding is configured by this change. The checked-in Worker configuration sets `PUBLISHING_ENABLED=false` and `GITHUB_REPOSITORY_ALLOWLIST=[]`.
+Kirisame uses the existing CyanAutomation GitHub App, App ID `3345400`. The code implements App JWT signing, installation resolution, repository-scoped token issuance, and the GitHub Git Data and Pull Requests APIs. The production Worker has the existing App key as a Cloudflare secret binding, and the App is installed on `CyanAutomation/somatic`. The installation currently selects all repositories. The App owner has accepted that scope and the App's current permission levels for this commissioning; no GitHub setting change is required. Publishing remains disabled, the repository allowlist is empty, and no Soyuz Service Binding is configured. The private key value is not stored in this repository.
 
 The App Homepage URL currently points to a general CyanAutomation portfolio page. A link to the Kirisame repository or Worker would describe the integration more clearly. The Homepage URL is descriptive metadata; it is not an OAuth callback URL. Do not change App settings as part of implementation work.
 
@@ -12,15 +12,18 @@ Use only the existing Kirisame App owned by CyanAutomation. Do not create anothe
 
 Configure these repository permissions on the App:
 
-| Permission | App access | Runtime use |
+| Permission | Current App access | Runtime use |
 | --- | --- | --- |
 | Metadata | Read-only | Resolve repository and installation identity. |
+| Actions | Read-only | Existing App grant; not requested by Kirisame's publication token. |
+| Checks | Read and write | Existing App grant; not requested by Kirisame's publication token. |
 | Contents | Read and write | Read base objects and write blobs, trees, commits, and publication refs. |
+| Commit statuses | Read and write | Existing App grant; not requested by Kirisame's publication token. |
 | Pull requests | Read and write | List, create, and reconcile PRs in PR mode. |
 
-Do not grant Workflows, Administration, Actions, secrets, checks, deployments, or organization permissions. Workflow files and changes to `.gitattributes` are rejected by Kirisame.
+The App owner accepts the existing Actions read, Checks read/write, and Commit statuses read/write grants for this commissioning. Kirisame still requests and verifies an installation token scoped to the exact target repository and only the permissions needed for the selected operation, plus Metadata read. Do not add Workflows, Administration, secrets, deployments, or organization permissions. Workflow files and changes to `.gitattributes` are rejected by Kirisame.
 
-Install the App only on explicitly selected repositories. The App installation's selected repositories and Kirisame's own allowlist are separate authorization gates. Do not install on all repositories by default.
+The current App installation selects all repositories. The App owner has explicitly accepted this scope for the current commissioning, so do not block this canary on repository selection and do not change the installation scope. The installation scope and Kirisame's own allowlist are separate gates: the allowlist must remain exact for `CyanAutomation/somatic`, and the runtime must request a token for that repository only.
 
 ## Private key and Worker configuration
 
@@ -64,15 +67,15 @@ Normal CI exercises signing and HTTP behavior using ephemeral keys and mocked Gi
 
 The approved Phase 2A.2 target is `CyanAutomation/somatic` with base branch `main`. Do not infer or substitute another repository or branch. Do not use production Soyuz to start the test.
 
-1. Confirm the approved repository and base branch, and independently verify the Kirisame App installation and required repository permissions before enabling publication.
+1. Confirm the approved repository and base branch, and verify the Kirisame App installation and current owner-approved permissions. The current all-repositories installation and extra Actions/Checks/Commit statuses grants are accepted for this commissioning; no scope or permission change is required.
 2. Use the existing `kirisame` Worker and its existing Cloudflare private-key secret. Do not deploy `kirisame-canary` as a publisher or copy credentials into the harness.
-3. Use `npm run dev -- --mode canary-harness` for the local-only harness. Its remote Service Binding targets the `PublisherEntrypoint` export on `kirisame`; the `/__canary/publish-replay` route accepts loopback requests only and is not a public publishing route.
-4. Temporarily set the Worker's publishing flag and exact single-repository/base-branch PR allowlist through Cloudflare only after source, permissions, token scope and public-route isolation are verified. Prepare one valid v1 PR request, invoke it through the local harness, and replay the exact same JSON only after the first response confirms an open PR.
+3. Use the deployed private Workflow invoker `kirisame-live-invoker`. It has no workers.dev or preview URL, no triggers, and only a `KIRISAME` Service Binding to `kirisame.PublisherEntrypoint`. Invoke its `preflight` action and require `{ status: "verified", repository: "CyanAutomation/somatic" }` before enabling publication.
+4. Temporarily set the Worker's publishing flag and exact single-repository/base-branch PR allowlist through Cloudflare only after the positive preflight and public-route isolation are verified. Use the invoker's `allowlist-probe` action and require `confirmed-denial` for its fixed non-allowlisted target. Prepare one valid v1 PR request and invoke the `publish` action; the Workflow replays the identical JSON only after the first response confirms the matching open PR.
 5. Independently confirm the branch, commit parent/tree, App author identity, PR head/base/marker, and that replay returned the same branch, commit and PR without another mutation.
 6. Verify an unauthorized repository is denied before authentication or mutation, the public production publishing route remains inaccessible, and diagnostics contain no credentials or file contents.
 7. Immediately restore `PUBLISHING_ENABLED=false` and `GITHUB_REPOSITORY_ALLOWLIST=[]`, verify the Cloudflare settings and public diagnostics, then record the sanitized GitHub and Cloudflare evidence. Leave the test PR open.
 
-Do not run the canary if App installation, permissions, repository-scoped token behavior, private binding or safe rollback cannot be verified. Do not broaden the allowlist or copy credentials into another service to get around a missing prerequisite.
+Do not run the canary unless the private preflight verifies the repository-scoped token behavior, the private binding is correct, and safe rollback is available. The App owner's accepted installation scope and permission levels above are not blockers. Do not broaden Kirisame's allowlist or copy credentials into another service to get around a missing prerequisite.
 
 ## Troubleshooting
 
@@ -82,7 +85,7 @@ Do not run the canary if App installation, permissions, repository-scoped token 
 | `REPOSITORY_NOT_ALLOWED` | The exact owner/repository is not in the Kirisame allowlist. Verify the approved spelling and JSON policy. |
 | `APP_NOT_INSTALLED` | The App is not installed on that repository, is suspended, or the returned repository identity does not match. Review installation selection. |
 | `GITHUB_PERMISSION_DENIED` | The installation/App lacks a permission required for the selected operation. Grant only the missing repository permission after review. |
-| `GITHUB_AUTH_INVALID` | GitHub rejected the App JWT or returned an invalid token scope/expiry. Rotate a revoked key through the approved process; never expose token values in diagnostics. |
+| `GITHUB_AUTH_INVALID` | GitHub rejected the App JWT or returned an invalid token scope/expiry. Verify that the Cloudflare secret is an active private key for this App without exposing the key; rotate only through the approved process if it is revoked. Never expose token values in diagnostics. |
 | `GITHUB_RATE_LIMITED` | GitHub returned a rate limit. Honor `Retry-After` and let Soyuz's future durable scheduler retry the same immutable request. |
 | `GITHUB_TIMEOUT` or `GITHUB_UNAVAILABLE` | The response was transient or uncertain. Reconcile GitHub state before retrying; do not assume a timed-out mutation failed. |
 
