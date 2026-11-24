@@ -8,7 +8,7 @@ import {
 } from "../github/GitHubAppAuth.js";
 import { RealGitHubAdapter } from "../github/RealGitHubAdapter.js";
 import { CANARY_PUBLICATION_TARGET } from "../shared/canary-target.js";
-import type { CanaryAuthorizationResult } from "../contracts/types.js";
+import type { CanaryAuthorizationDiagnosticStep, CanaryAuthorizationResult } from "../contracts/types.js";
 import { runAuthorizationPreflightStage } from "./authorization-preflight.js";
 import { PublicationService } from "./service.js";
 import { parseRepositoryAllowlist } from "./allowlist.js";
@@ -68,21 +68,28 @@ export async function verifyCanaryRepositoryAuthorization(
   });
   if (!signing.ok) return rejectedAuthorization(signing);
 
+  let diagnostic: { step: CanaryAuthorizationDiagnosticStep; httpStatus?: number } = { step: "installation_lookup" };
   const installationScope = await runAuthorizationPreflightStage("installation_and_token_scope", async () => {
-    await new RealGitHubAdapter(credentials!, { fetch: fetcher }).resolveRepository(
+    await new RealGitHubAdapter(credentials!, {
+      fetch: fetcher,
+      onAuthorizationDiagnostic: (step, httpStatus) => {
+        diagnostic = { step, ...(httpStatus !== undefined ? { httpStatus } : {}) };
+      },
+    }).resolveRepository(
       { owner: CANARY_PUBLICATION_TARGET.owner, name: CANARY_PUBLICATION_TARGET.repository },
       "pr",
     );
   });
-  if (!installationScope.ok) return rejectedAuthorization(installationScope);
+  if (!installationScope.ok) return rejectedAuthorization(installationScope, diagnostic);
 
   return { status: "verified", repository: "CyanAutomation/somatic" };
 }
 
 function rejectedAuthorization(
   result: Exclude<Awaited<ReturnType<typeof runAuthorizationPreflightStage>>, { ok: true }>,
+  diagnostic: { step: CanaryAuthorizationDiagnosticStep; httpStatus?: number } = { step: "installation_lookup" },
 ): CanaryAuthorizationResult {
-  return { status: "rejected", code: result.code, failureStage: result.failureStage };
+  return { status: "rejected", code: result.code, failureStage: result.failureStage, diagnostic };
 }
 
 export async function isProductionPublishingConfigured(environment: unknown): Promise<boolean> {
