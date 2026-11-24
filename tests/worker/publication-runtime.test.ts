@@ -97,8 +97,34 @@ describe("production publication configuration", () => {
       status: "rejected",
       code: "GITHUB_AUTH_INVALID",
       failureStage: "installation_and_token_scope",
+      diagnostic: { step: "installation_lookup", httpStatus: 401 },
     });
     expect(JSON.stringify(githubFailure)).not.toContain(responseDetail);
+  });
+
+  it("identifies token-response validation without returning GitHub response content", async () => {
+    const { credentials } = await generateTestGitHubAppKeys();
+    const fetcher: typeof fetch = async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname.endsWith("/installation")) return json({
+        id: 42, app_id: 3345400, account: { login: "CyanAutomation" },
+        permissions: { metadata: "read", contents: "write", pull_requests: "write" }, suspended_at: null,
+      });
+      return json({ message: "sensitive-response-body" }, 201);
+    };
+    const result = await verifyCanaryRepositoryAuthorization({
+      GITHUB_APP_ID: credentials.appId,
+      GITHUB_APP_PRIVATE_KEY: credentials.privateKey,
+    }, fetcher);
+
+    expect(result).toEqual({
+      status: "rejected",
+      code: "GITHUB_AUTH_INVALID",
+      failureStage: "installation_and_token_scope",
+      diagnostic: { step: "token_validation", httpStatus: 201 },
+    });
+    expect(JSON.stringify(result)).not.toContain("sensitive-response-body");
+    expect(JSON.stringify(result)).not.toContain(credentials.privateKey);
   });
 
   it("keeps publishing disabled unless the explicit commissioning gate is true", async () => {
