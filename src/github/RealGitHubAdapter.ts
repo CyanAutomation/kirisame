@@ -16,6 +16,7 @@ import type {
   PullRequestRecord,
   RepositoryIdentity,
 } from "./types.js";
+import type { CanaryAuthorizationDiagnosticStep } from "../contracts/types.js";
 
 const API_ORIGIN = "https://api.github.com";
 const API_VERSION = "2026-03-10";
@@ -29,6 +30,7 @@ export interface RealGitHubAdapterOptions {
   fetch?: typeof fetch;
   now?: () => number;
   requestTimeoutMs?: number;
+  onAuthorizationDiagnostic?: (step: CanaryAuthorizationDiagnosticStep, httpStatus?: number) => void;
 }
 
 interface JsonResponse {
@@ -41,6 +43,7 @@ interface RequestOptions {
   method?: "GET" | "POST";
   body?: unknown;
   token: string;
+  authorizationDiagnosticStep?: CanaryAuthorizationDiagnosticStep;
   allowNotFound?: boolean;
   notFoundCode?: "APP_NOT_INSTALLED" | "GITHUB_UNAVAILABLE";
   conflictCode?: "BASE_TREE_CONFLICT" | "BRANCH_CONFLICT" | "PULL_REQUEST_CONFLICT";
@@ -60,6 +63,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
   readonly #fetch: typeof fetch;
   readonly #now: () => number;
   readonly #requestTimeoutMs: number;
+  readonly #onAuthorizationDiagnostic: RealGitHubAdapterOptions["onAuthorizationDiagnostic"];
   #installationToken: string | undefined;
   #tokenExpiresAt = 0;
   #authorizedRepositoryKey: string | undefined;
@@ -72,6 +76,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
     this.#fetch = options.fetch ?? fetch;
     this.#now = options.now ?? Date.now;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
+    this.#onAuthorizationDiagnostic = options.onAuthorizationDiagnostic;
     if (!Number.isSafeInteger(this.#requestTimeoutMs) || this.#requestTimeoutMs < 100 || this.#requestTimeoutMs > 30_000) {
       throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
     }
@@ -88,8 +93,10 @@ export class RealGitHubAdapter implements GitHubAdapter {
       token: appJwt,
       allowNotFound: true,
       notFoundCode: "APP_NOT_INSTALLED",
+      authorizationDiagnosticStep: "installation_lookup",
     });
     if (!installationResponse) throw new PublicationFailure("APP_NOT_INSTALLED");
+    this.#onAuthorizationDiagnostic?.("installation_validation", installationResponse.status);
     const installation = parseInstallation(installationResponse.data, repository, this.#credentials.appId);
     assertInstallationPermissions(installation.permissions, operation);
 
@@ -100,7 +107,9 @@ export class RealGitHubAdapter implements GitHubAdapter {
       token: appJwt,
       body: { repositories: [repository.name], permissions },
       notFoundCode: "APP_NOT_INSTALLED",
+      authorizationDiagnosticStep: "token_creation",
     });
+    this.#onAuthorizationDiagnostic?.("token_validation", tokenResponse.status);
     const issuedToken = parseInstallationToken(tokenResponse.data, repository, permissions, this.#now());
     this.#installationToken = issuedToken.token;
     this.#tokenExpiresAt = issuedToken.expiresAt;
@@ -110,7 +119,9 @@ export class RealGitHubAdapter implements GitHubAdapter {
     const repositoryResponse = await this.#request(repoApiPath(repository), {
       token: this.#installationToken,
       notFoundCode: "APP_NOT_INSTALLED",
+      authorizationDiagnosticStep: "repository_verification",
     });
+    this.#onAuthorizationDiagnostic?.("repository_verification", repositoryResponse.status);
     const identity = parseRepositoryIdentity(repositoryResponse.data, repository, installation.id);
     if (identity.id !== issuedToken.repositories[0]?.id) throw new PublicationFailure("APP_NOT_INSTALLED");
     this.#identity = identity;
@@ -310,6 +321,9 @@ export class RealGitHubAdapter implements GitHubAdapter {
         outcome,
         durationMs: Date.now() - startedAt,
       }));
+      if (options.authorizationDiagnosticStep) {
+        this.#onAuthorizationDiagnostic?.(options.authorizationDiagnosticStep, httpStatus);
+      }
     }
   }
 

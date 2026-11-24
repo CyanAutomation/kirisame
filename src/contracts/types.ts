@@ -152,10 +152,18 @@ export type CanaryAuthorizationFailureStage =
   | "installation_and_token_scope"
   | "internal";
 
+export type CanaryAuthorizationDiagnosticStep =
+  | "installation_lookup"
+  | "installation_validation"
+  | "token_creation"
+  | "token_validation"
+  | "repository_verification";
+
 export type CanaryAuthorizationResult =
   | { status: "verified"; repository: "CyanAutomation/somatic" }
   | {
     status: "rejected";
     code: PublicationErrorCode;
     failureStage: CanaryAuthorizationFailureStage;
+    diagnostic?: { step: CanaryAuthorizationDiagnosticStep; httpStatus?: number };
   };
