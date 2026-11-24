@@ -136,6 +136,8 @@ The App owner still needs to verify that the existing Cloudflare secret correspo
 
 ## PR replay identity
 
+Repository owner and name comparisons are case-insensitive: Kirisame normalizes both to lowercase for allowlist authorization, GitHub installation identity checks and PR reconciliation. The lowercase `cyanautomation` owner in the preserved canary request is equivalent to `CyanAutomation` and remains unchanged to preserve the original request.
+
 ### Live canary attempt — 2026-11-24
 
 After the owner replaced the GitHub App private key in Cloudflare, private preflight `codex-key-rotation-preflight-20261124` verified the exact `CyanAutomation/somatic` repository and token scope. The public publication route returned 404 for both GET and a forged-header POST. A temporary allowlist permitted only Somatic PRs against `main`; the private `codex-canary-denial-20261124` probe confirmed `REPOSITORY_NOT_ALLOWED` for the non-allowlisted target.
