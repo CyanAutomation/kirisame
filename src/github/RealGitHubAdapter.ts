@@ -16,6 +16,7 @@ import type {
   PullRequestRecord,
   RepositoryIdentity,
 } from "./types.js";
+import type { CanaryAuthorizationDiagnosticStep } from "../contracts/types.js";
 
 const API_ORIGIN = "https://api.github.com";
 const API_VERSION = "2026-03-10";
@@ -29,6 +30,7 @@ export interface RealGitHubAdapterOptions {
   fetch?: typeof fetch;
   now?: () => number;
   requestTimeoutMs?: number;
+  onAuthorizationDiagnostic?: (step: CanaryAuthorizationDiagnosticStep, httpStatus?: number) => void;
 }
 
 interface JsonResponse {
@@ -60,6 +62,8 @@ export class RealGitHubAdapter implements GitHubAdapter {
   readonly #fetch: typeof fetch;
   readonly #now: () => number;
   readonly #requestTimeoutMs: number;
+  readonly #onAuthorizationDiagnostic: RealGitHubAdapterOptions["onAuthorizationDiagnostic"];
+  #authorizationStep: CanaryAuthorizationDiagnosticStep = "installation_lookup";
   #installationToken: string | undefined;
   #tokenExpiresAt = 0;
   #authorizedRepositoryKey: string | undefined;
@@ -72,6 +76,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
     this.#fetch = options.fetch ?? fetch;
     this.#now = options.now ?? Date.now;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
+    this.#onAuthorizationDiagnostic = options.onAuthorizationDiagnostic;
     if (!Number.isSafeInteger(this.#requestTimeoutMs) || this.#requestTimeoutMs < 100 || this.#requestTimeoutMs > 30_000) {
       throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
     }
@@ -84,33 +89,41 @@ export class RealGitHubAdapter implements GitHubAdapter {
     const key = repositoryKey(repository);
     const appJwt = await createGitHubAppJwt(this.#credentials, Math.floor(this.#now() / 1000));
     const installationPath = `${repoApiPath(repository)}/installation`;
+    this.#authorizationStep = "installation_lookup";
     const installationResponse = await this.#request(installationPath, {
       token: appJwt,
       allowNotFound: true,
       notFoundCode: "APP_NOT_INSTALLED",
     });
     if (!installationResponse) throw new PublicationFailure("APP_NOT_INSTALLED");
+    this.#authorizationStep = "installation_validation";
+    this.#onAuthorizationDiagnostic?.(this.#authorizationStep, installationResponse.status);
     const installation = parseInstallation(installationResponse.data, repository, this.#credentials.appId);
     assertInstallationPermissions(installation.permissions, operation);
 
     const permissions: Record<string, string> = { contents: "write" };
     if (operation === "pr") permissions.pull_requests = "write";
+    this.#authorizationStep = "token_creation";
     const tokenResponse = await this.#request(`/app/installations/${installation.id}/access_tokens`, {
       method: "POST",
       token: appJwt,
       body: { repositories: [repository.name], permissions },
       notFoundCode: "APP_NOT_INSTALLED",
     });
+    this.#authorizationStep = "token_validation";
+    this.#onAuthorizationDiagnostic?.(this.#authorizationStep, tokenResponse.status);
     const issuedToken = parseInstallationToken(tokenResponse.data, repository, permissions, this.#now());
     this.#installationToken = issuedToken.token;
     this.#tokenExpiresAt = issuedToken.expiresAt;
     this.#authorizedRepositoryKey = key;
     this.#authorizedOperation = operation;
 
+    this.#authorizationStep = "repository_verification";
     const repositoryResponse = await this.#request(repoApiPath(repository), {
       token: this.#installationToken,
       notFoundCode: "APP_NOT_INSTALLED",
     });
+    this.#onAuthorizationDiagnostic?.(this.#authorizationStep, repositoryResponse.status);
     const identity = parseRepositoryIdentity(repositoryResponse.data, repository, installation.id);
     if (identity.id !== issuedToken.repositories[0]?.id) throw new PublicationFailure("APP_NOT_INSTALLED");
     this.#identity = identity;
@@ -310,6 +323,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
         outcome,
         durationMs: Date.now() - startedAt,
       }));
+      this.#onAuthorizationDiagnostic?.(this.#authorizationStep, httpStatus);
     }
   }
 
