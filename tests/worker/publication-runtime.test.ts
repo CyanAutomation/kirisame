@@ -51,7 +51,10 @@ describe("production publication configuration", () => {
       GITHUB_APP_ID: credentials.appId,
       GITHUB_APP_PRIVATE_KEY: credentials.privateKey,
       GITHUB_REPOSITORY_ALLOWLIST: "[]",
-    }, fetcher)).resolves.toBeUndefined();
+    }, fetcher)).resolves.toEqual({
+      status: "verified",
+      repository: "CyanAutomation/somatic",
+    });
 
     expect(calls.map(({ path, method }) => [path, method])).toEqual([
       ["/repos/CyanAutomation/somatic/installation", "GET"],
@@ -62,6 +65,40 @@ describe("production publication configuration", () => {
       repositories: ["somatic"],
       permissions: { contents: "write", pull_requests: "write" },
     });
+  });
+
+  it("reports configuration, key-import, and installation failures by stage", async () => {
+    const { credentials } = await generateTestGitHubAppKeys();
+    await expect(verifyCanaryRepositoryAuthorization({
+      GITHUB_APP_ID: "wrong-app-id",
+      GITHUB_APP_PRIVATE_KEY: credentials.privateKey,
+    })).resolves.toEqual({
+      status: "rejected",
+      code: "PUBLISHING_UNAVAILABLE",
+      failureStage: "configuration",
+    });
+
+    await expect(verifyCanaryRepositoryAuthorization({
+      GITHUB_APP_ID: credentials.appId,
+      GITHUB_APP_PRIVATE_KEY: "malformed-key-material",
+    })).resolves.toEqual({
+      status: "rejected",
+      code: "PUBLISHING_UNAVAILABLE",
+      failureStage: "private_key_import",
+    });
+
+    const responseDetail = "github-error-body-must-not-escape";
+    const rejectedByGitHub: typeof fetch = async () => json({ message: responseDetail }, 401);
+    const githubFailure = await verifyCanaryRepositoryAuthorization({
+      GITHUB_APP_ID: credentials.appId,
+      GITHUB_APP_PRIVATE_KEY: credentials.privateKey,
+    }, rejectedByGitHub);
+    expect(githubFailure).toEqual({
+      status: "rejected",
+      code: "GITHUB_AUTH_INVALID",
+      failureStage: "installation_and_token_scope",
+    });
+    expect(JSON.stringify(githubFailure)).not.toContain(responseDetail);
   });
 
   it("keeps publishing disabled unless the explicit commissioning gate is true", async () => {

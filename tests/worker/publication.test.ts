@@ -687,6 +687,7 @@ describe("private and public Worker entrypoints", () => {
     await expect(workerExports.PublisherEntrypoint.verifyCanaryAuthorization()).resolves.toEqual({
       status: "rejected",
       code: "PUBLISHING_UNAVAILABLE",
+      failureStage: "configuration",
     });
   });
 
@@ -699,7 +700,11 @@ describe("private and public Worker entrypoints", () => {
 
     const result = await publisher.verifyCanaryAuthorization();
 
-    expect(result).toEqual({ status: "rejected", code: "PUBLISHING_UNAVAILABLE" });
+    expect(result).toEqual({
+      status: "rejected",
+      code: "PUBLISHING_UNAVAILABLE",
+      failureStage: "private_key_import",
+    });
     expect(JSON.stringify(result)).not.toContain(secret);
   });
 

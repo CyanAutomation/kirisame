@@ -25,10 +25,13 @@ export class PublisherEntrypoint extends WorkerEntrypoint {
   // fallow-ignore-next-line unused-class-member -- Invoked by a private Cloudflare Worker Service Binding.
   async verifyCanaryAuthorization(): Promise<CanaryAuthorizationResult> {
     try {
-      await verifyCanaryRepositoryAuthorization(this.env as unknown as PublisherRuntimeEnvironment);
-      return { status: "verified", repository: "CyanAutomation/somatic" };
+      return await verifyCanaryRepositoryAuthorization(this.env as unknown as PublisherRuntimeEnvironment);
     } catch (error) {
-      return { status: "rejected", code: asPublicationFailure(error).code };
+      return {
+        status: "rejected",
+        code: asPublicationFailure(error).code,
+        failureStage: "internal",
+      };
     }
   }
 

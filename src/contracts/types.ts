@@ -140,6 +140,17 @@ export interface ValidationResult {
 
 export type PublisherResponse = PublicationResult | PublicationError;
 
+export type CanaryAuthorizationFailureStage =
+  | "configuration"
+  | "private_key_import"
+  | "github_app_signing"
+  | "installation_and_token_scope"
+  | "internal";
+
 export type CanaryAuthorizationResult =
   | { status: "verified"; repository: "CyanAutomation/somatic" }
-  | { status: "rejected"; code: PublicationErrorCode };
+  | {
+    status: "rejected";
+    code: PublicationErrorCode;
+    failureStage: CanaryAuthorizationFailureStage;
+  };

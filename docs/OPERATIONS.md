@@ -77,6 +77,18 @@ The approved test was attempted through deployed Cloudflare resources. Productio
 
 The read-only authorization preflight completed through the private binding but returned `PUBLISHING_UNAVAILABLE` (Workflow instance `cf_524b03bdba19cc60303e0865d17563b27fc5b96d2a563d66c0e483e45e42b5eb`). The secret binding exists and was left untouched, but this result did not verify GitHub App authentication, installation permissions or the repository-scoped token. Publishing was never enabled and the allowlist was never changed. A separate private publish-path check with the exact approved Somatic fixture returned `PUBLISHING_UNAVAILABLE` (instance `cf_537490518983c4cc1e94f7a54164221d42f3a41890d717bb8b1630f6942121b0`, one completed step); no replay was attempted.
 
+The follow-up preflight result includes a safe `failureStage` alongside the stable publication `code`. It never returns exception messages, App JWTs, installation tokens or key material. Interpret the stage as follows:
+
+| `failureStage` | Meaning and next check |
+| --- | --- |
+| `configuration` | The App ID or private-key binding is missing or the non-secret configuration is invalid. Check the binding names and App ID in Cloudflare. |
+| `private_key_import` | The runtime could not parse/import the configured key. Keep the existing secret value private; use the Cloudflare secret-management flow to repair it only if its owner confirms the intended key. |
+| `github_app_signing` | The imported key could not sign an App JWT. Do not enable publishing; investigate the configured key/runtime compatibility without exposing the key. |
+| `installation_and_token_scope` | GitHub installation, permission, API, or scoped-token validation failed. Use the stable `code` to distinguish missing installation, denied permissions, rejected authentication, rate limiting, or an unavailable response. The adapter requests only `CyanAutomation/somatic` with contents and pull-request write permissions and validates that exact scope before returning success. |
+| `internal` | An unexpected preflight failure occurred outside the named checks. Keep publishing disabled and inspect sanitized runtime diagnostics. |
+
+Only `{ status: "verified", repository: "CyanAutomation/somatic" }` is positive authorization evidence. Any rejected result is a stop condition; do not enable the gate or change the allowlist.
+
 GitHub independently shows no `kirisame/p/01a20a97-3e74-7e45-88fb-f29ec304a6e2` branch or matching PR, and `kirisame-canary/verification.txt` is absent from Somatic `main`. No branch, commit or PR was created. The production gate remains `PUBLISHING_ENABLED=false`, the allowlist remains `[]`, the existing private-key secret binding remains present, and there is no Soyuz binding. Public checks returned `/health` 200, `/readyz` 503 with `publishing: unavailable`, and both GET and forged-header POST to `/internal/v1/publications` 404.
 
 The repository checks passed: `npm ci`, `npm test` (44 contract and 207 Worker tests), `npm run typecheck`, `npm run lint`, live-invoker build, and `npm audit` (zero vulnerabilities). `fallow audit` returned `warn` for introduced test/config complexity and a documented private-entrypoint suppression; it reported zero dead-code issues and did not fail the gate. The safe failure result is documented in Kirisame PR #7. Retry only after the generic `PUBLISHING_UNAVAILABLE` result has been resolved and a positive read-only preflight verifies the exact Somatic installation permissions and token scope. Do not enable publishing until then.
