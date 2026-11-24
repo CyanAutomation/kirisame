@@ -23,6 +23,7 @@ export function resolveWorkerSettings(
   const canaryHarness = mode === "canary-harness";
   const canaryReceiver = mode === "canary-receiver";
   const workflowInvoker = mode === "live-canary-invoker";
+  const publishingEnabled = canaryReceiver ? canary.enabled : environment?.PUBLISHING_ENABLED === "true";
 
   return {
     workerName: canaryHarness ? "kirisame-canary-harness"
@@ -34,8 +35,9 @@ export function resolveWorkerSettings(
     canaryRepository: canary.repository,
     canaryBaseRef: canary.baseRef,
     canaryAllowlist: canary.allowlist,
-    publishingEnabled: canaryReceiver && canary.enabled,
-    repositoryAllowlist: canaryReceiver ? canary.allowlist : "[]",
+    publishingEnabled,
+    repositoryAllowlist: canaryReceiver ? canary.allowlist
+      : publishingEnabled ? environment?.GITHUB_REPOSITORY_ALLOWLIST ?? "[]" : "[]",
     sourceSha: environment?.GITHUB_SHA ?? "unknown",
     appVersion: environment?.KIRISAME_APP_VERSION ?? "0.1.0",
     buildTimestamp: environment?.KIRISAME_BUILD_TIMESTAMP ?? "unknown",

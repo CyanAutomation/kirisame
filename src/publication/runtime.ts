@@ -22,6 +22,11 @@ export interface PublisherRuntimeEnvironment extends Record<string, unknown> {
   GITHUB_REPOSITORY_ALLOWLIST?: unknown;
 }
 
+export interface PublicationDiagnosticContext {
+  requestId: string;
+  publicationId: string;
+}
+
 interface PublicationSettings {
   appId: string | undefined;
   clientId: string | undefined;
@@ -29,7 +34,10 @@ interface PublicationSettings {
   allowlistJson: string | undefined;
 }
 
-export async function createProductionPublicationService(environment: PublisherRuntimeEnvironment): Promise<PublicationService> {
+export async function createProductionPublicationService(
+  environment: PublisherRuntimeEnvironment,
+  diagnosticContext?: PublicationDiagnosticContext,
+): Promise<PublicationService> {
   if (environment.PUBLISHING_ENABLED !== "true") throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
   const { appId, clientId, privateKey, allowlistJson } = readPublicationSettings(environment);
   if (!appId || !privateKey || !allowlistJson) throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
@@ -38,7 +46,7 @@ export async function createProductionPublicationService(environment: PublisherR
   await importGitHubAppPrivateKey(privateKey);
   const rules = parseRepositoryAllowlist(allowlistJson);
   if (rules.length === 0) throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
-  return new PublicationService(new RealGitHubAdapter(credentials), new RepositoryAllowlistPolicy(rules));
+  return new PublicationService(new RealGitHubAdapter(credentials, diagnosticContext), new RepositoryAllowlistPolicy(rules));
 }
 
 /** Read-only fixed-scope App and installation-token preflight; deliberately independent of the publishing gate. */

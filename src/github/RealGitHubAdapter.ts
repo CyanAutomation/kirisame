@@ -21,6 +21,7 @@ import type { CanaryAuthorizationDiagnosticStep } from "../contracts/types.js";
 const API_ORIGIN = "https://api.github.com";
 const API_VERSION = "2026-03-10";
 const MAX_JSON_RESPONSE_BYTES = 4 * 1024 * 1024;
+const MAX_TREE_RESPONSE_BYTES = 7 * 1024 * 1024;
 const MAX_ERROR_RESPONSE_BYTES = 32 * 1024;
 const MAX_TREE_ENTRIES = 50_000;
 const MAX_TREE_DEPTH = 64;
@@ -30,6 +31,8 @@ export interface RealGitHubAdapterOptions {
   fetch?: typeof fetch;
   now?: () => number;
   requestTimeoutMs?: number;
+  requestId?: string;
+  publicationId?: string;
   onAuthorizationDiagnostic?: (step: CanaryAuthorizationDiagnosticStep, httpStatus?: number) => void;
 }
 
@@ -63,6 +66,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
   readonly #fetch: typeof fetch;
   readonly #now: () => number;
   readonly #requestTimeoutMs: number;
+  readonly #diagnosticLogFields: { requestId?: string; publicationId?: string };
   readonly #onAuthorizationDiagnostic: RealGitHubAdapterOptions["onAuthorizationDiagnostic"];
   #installationToken: string | undefined;
   #tokenExpiresAt = 0;
@@ -76,6 +80,10 @@ export class RealGitHubAdapter implements GitHubAdapter {
     this.#fetch = options.fetch ?? fetch;
     this.#now = options.now ?? Date.now;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
+    this.#diagnosticLogFields = {
+      ...(options.requestId ? { requestId: options.requestId } : {}),
+      ...(options.publicationId ? { publicationId: options.publicationId } : {}),
+    };
     this.#onAuthorizationDiagnostic = options.onAuthorizationDiagnostic;
     if (!Number.isSafeInteger(this.#requestTimeoutMs) || this.#requestTimeoutMs < 100 || this.#requestTimeoutMs > 30_000) {
       throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
@@ -153,7 +161,10 @@ export class RealGitHubAdapter implements GitHubAdapter {
 
   async readTree(repository: Repository, treeSha: string): Promise<GitTreeEntry[]> {
     if (!validGitSha(treeSha)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-    return this.#readTreeRecursive(repository, treeSha, "", 0, { count: 0 });
+    const result = await this.#request(`${repoApiPath(repository)}/git/trees/${treeSha}?recursive=1`, {
+      token: this.#token(repository), maxBytes: MAX_TREE_RESPONSE_BYTES,
+    });
+    return parseGitTreePage(result.data, treeSha, { count: 0 }, true);
   }
 
   async readBlob(repository: Repository, sha: string): Promise<Uint8Array | undefined> {
@@ -259,27 +270,6 @@ export class RealGitHubAdapter implements GitHubAdapter {
     return pullRequest;
   }
 
-  async #readTreeRecursive(
-    repository: Repository,
-    treeSha: string,
-    prefix: string,
-    depth: number,
-    entryCounter: { count: number },
-  ): Promise<GitTreeEntry[]> {
-    if (depth > MAX_TREE_DEPTH) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-    const result = await this.#request(`${repoApiPath(repository)}/git/trees/${treeSha}`, {
-      token: this.#token(repository), maxBytes: MAX_JSON_RESPONSE_BYTES,
-    });
-    const entries = parseGitTreePage(result.data, treeSha, prefix, entryCounter);
-    const output = [...entries];
-    for (const entry of entries) {
-      if (entry.type === "tree") {
-        output.push(...await this.#readTreeRecursive(repository, entry.sha, entry.path, depth + 1, entryCounter));
-      }
-    }
-    return output;
-  }
-
   async #request(path: string, options: RequestOptions & { allowNotFound: true }): Promise<JsonResponse | undefined>;
   async #request(path: string, options: RequestOptions): Promise<JsonResponse>;
   async #request(path: string, options: RequestOptions): Promise<JsonResponse | undefined> {
@@ -315,6 +305,7 @@ export class RealGitHubAdapter implements GitHubAdapter {
       clearTimeout(timeout);
       console.info(JSON.stringify({
         operation: "github_api",
+        ...this.#diagnosticLogFields,
         category: apiOperationCategory(url.pathname),
         method: options.method ?? "GET",
         ...(httpStatus !== undefined ? { httpStatus } : {}),
@@ -389,33 +380,33 @@ function parseCreatedGitCommit(value: unknown, input: CreateCommitInput): GitCom
 function parseGitTreePage(
   value: unknown,
   treeSha: string,
-  prefix: string,
   entryCounter: { count: number },
+  recursive = false,
 ): GitTreeEntry[] {
   const record = asRecord(value);
   if (record.sha !== treeSha || record.truncated !== false || !Array.isArray(record.tree)) {
     throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
   }
   const names = new Set<string>();
-  return record.tree.map((item) => parseGitTreeEntry(item, prefix, names, entryCounter));
+  return record.tree.map((item) => parseGitTreeEntry(item, names, entryCounter, recursive));
 }
 
 function parseGitTreeEntry(
   item: unknown,
-  prefix: string,
   names: Set<string>,
   entryCounter: { count: number },
+  recursive: boolean,
 ): GitTreeEntry {
   const raw = asRecord(item);
   const name = stringAt(raw, "path");
   const mode = stringAt(raw, "mode");
   const type = stringAt(raw, "type");
   const sha = stringAt(raw, "sha");
-  assertGitTreeEntry(name, mode, type, sha, names);
+  assertGitTreeEntry(name, mode, type, sha, names, recursive);
   names.add(name);
   entryCounter.count += 1;
   if (entryCounter.count > MAX_TREE_ENTRIES) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
-  return { path: prefix ? `${prefix}/${name}` : name, mode, type, sha };
+  return { path: name, mode, type, sha };
 }
 
 function assertGitTreeEntry(
@@ -424,9 +415,23 @@ function assertGitTreeEntry(
   type: string,
   sha: string,
   names: Set<string>,
+  recursive: boolean,
 ): void {
-  if (!name || name.includes("/") || name === "." || name === ".." || !validGitSha(sha)
-    || !isValidModeType(mode, type) || names.has(name)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  assertGitTreeEntryPath(name, recursive);
+  if (!validGitSha(sha)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  if (!isValidModeType(mode, type)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+  if (names.has(name)) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+}
+
+function assertGitTreeEntryPath(name: string, recursive: boolean): void {
+  if (!recursive) {
+    if (!name || name.includes("/") || name === "." || name === "..") {
+      throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
+    }
+    return;
+  }
+  validateGitObjectPath(name);
+  if (name.split("/").length > MAX_TREE_DEPTH) throw new PublicationFailure("UNSUPPORTED_GIT_OBJECT");
 }
 
 interface ProcessedResponse {
