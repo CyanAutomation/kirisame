@@ -10,7 +10,7 @@ Soyuz stores publication-ready manifests in private R2 and pins them through the
 
 Define a structured immutable file-change manifest for UTF-8 additions, modifications and deletions. For the first implementation, Soyuz loads the verified manifest from R2 and sends it inline to Kirisame over the private Service Binding. Bound one decoded manifest to 5 MiB content, 100 files, 1 MiB per file, 8 MiB canonical manifest JSON and 9 MiB request body.
 
-Soyuz's source retention gives a publication artifact the owning run's absolute 90-day deadline. Publication state does not extend the deadline. Production migration 0011 and Worker rollout remain separately gated.
+Soyuz's source retention gives a publication artifact the owning run's absolute 90-day deadline. Publication state does not extend the deadline. Production migration `0009` is applied; migration 0011 and Worker rollout remain separately gated.
 
 ## Alternatives considered
 
