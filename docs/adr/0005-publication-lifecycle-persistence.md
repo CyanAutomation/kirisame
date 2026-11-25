@@ -1,6 +1,6 @@
 # ADR 0005: Soyuz owns publication lifecycle state
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
