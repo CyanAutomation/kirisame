@@ -6,7 +6,7 @@ Kirisame is a standalone, Cloudflare-native service designed to commit validated
 
 It provides a dedicated boundary between systems that **generate code** and systems authorised to **publish code**.
 
-> **Project status:** Phase 0.1, Phase 1.1 publishing hardening, Phase 2A GitHub App authentication, and Phase 2A.1 GitHub API compatibility are implemented. A private local canary harness and isolated receiver configuration are prepared, but no live canary has run. The public Worker remains diagnostics-only, publishing is disabled, the allowlist is empty, and no Soyuz binding or executor migration is configured.
+> **Project status:** Phase 0.1, Phase 1.1 publishing hardening, Phase 2A GitHub App authentication, and Phase 2A.1 GitHub API compatibility are implemented. The live private canary passed and production publishing is enabled only for `CyanAutomation/somatic` PRs to `main`. Public HTTP remains diagnostics-only. Soyuz's durable publication ledger is implemented and deployed. Kaseki's claim-bound manifest producer is implemented in source, and Soyuz source now declares the private `KIRISAME` binding with dispatch off; neither source change has been rolled out to the trusted host or production Worker yet.
 
 ## Overview
 
@@ -64,7 +64,7 @@ Kirisame must not become a general-purpose remote Git command execution service.
 
 ## Intended GitHub authentication
 
-The Worker contains a Workers-compatible GitHub App authenticator and real GitHub REST adapter. Publishing remains disabled by default. The production Worker has the existing App private key as a Cloudflare secret binding, and the App is installed on `CyanAutomation/somatic`; no private key value is stored in the repository. The production allowlist remains empty and no Soyuz Service Binding is configured.
+The Worker contains a Workers-compatible GitHub App authenticator and real GitHub REST adapter. Code defaults remain fail-closed. Production has an existing App private-key secret binding and an exact allowlist for PRs to `CyanAutomation/somatic` with base `main`; no private-key value is stored in the repository. The private canary passed as Somatic PR #128 and an identical replay reused the same PR. Production Soyuz does not have the binding yet; its source config now declares the private entrypoint with dispatch disabled.
 
 For each authorized publication, Kirisame uses the dedicated GitHub App.
 
@@ -227,8 +227,8 @@ Kirisame is designed as a lightweight, Cloudflare-native TypeScript service.
 | Component | Purpose |
 |---|---|
 | Cloudflare Workers | Run the public diagnostics and the private, explicitly gated GitHub publisher |
-| Service Bindings | Intended private communication with Soyuz; not configured yet |
-| Worker Secrets | Intended GitHub App key storage; no secrets are configured |
+| Service Bindings | Production has only the private canary invoker; Soyuz source declares `KIRISAME` with dispatch off, pending rollout |
+| Worker Secrets | Existing GitHub App key secret binding; its value is not stored here |
 | Workers Observability | Structured operational logs and diagnostics |
 
 Cloudflare D1, Queues or Workflows may be introduced when justified by publication requirements. They are not mandatory prerequisites for the initial implementation.
@@ -237,7 +237,7 @@ Cloudflare D1, Queues or Workflows may be introduced when justified by publicati
 
 The intended private interface is a typed Cloudflare Service Binding named `KIRISAME`, with a separate `PublisherEntrypoint.publish(requestJson)` RPC. It accepts a JSON serialization of the v1 request and enforces a 9 MiB UTF-8 cap before parsing. No production binding is configured yet. The public Worker exposes only `/`, `/health` and `/readyz`; requests to `/internal/v1/publications` return 404 and cannot invoke publication logic.
 
-The checked-in production configuration returns a structured `PUBLISHING_UNAVAILABLE` error for valid requests. The test-only binding injects a mock adapter and is not part of the production Worker entrypoint. Kirisame must not expose an unauthenticated public publishing endpoint.
+The code default for `PUBLISHING_ENABLED` remains `false`; production currently enables publishing only for the exact Somatic PR-to-`main` allowlist. The test-only binding injects a mock adapter and is not part of the production Worker entrypoint. Kirisame must not expose an unauthenticated public publishing endpoint.
 
 Any future external API must have an explicit authentication, authorisation and rate-limiting model.
 
@@ -247,13 +247,13 @@ Local development and CI exercise mocked GitHub interactions without requiring p
 
 The checked-in configuration includes these fail-closed settings:
 
-- `PUBLISHING_ENABLED=false` — explicit commissioning gate.
+- `PUBLISHING_ENABLED=false` — fail-closed code default; production is enabled for the canary allowlist only.
 - `GITHUB_APP_ID=3345400` — public GitHub App identifier.
 - `GITHUB_APP_CLIENT_ID` — optional JWT issuer identifier.
 - `GITHUB_APP_PRIVATE_KEY` — Worker secret binding with no value in source control.
-- `GITHUB_REPOSITORY_ALLOWLIST=[]` — strict JSON repository, operation and base-branch policy; empty denies all repositories.
+- `GITHUB_REPOSITORY_ALLOWLIST=[]` — fail-closed code default; production has one exact Somatic PR-to-`main` rule.
 
-Keep `PUBLISHING_ENABLED=false` until a private caller and approved canary target exist. The intended future Service Binding is named `KIRISAME` and is documented in [Soyuz integration](docs/SOYUZ-INTEGRATION.md). Readiness checks validate configuration only; they do not contact GitHub or prove that an installation is usable.
+The code default for `PUBLISHING_ENABLED` is `false`. Production currently has it enabled only with the exact Somatic PR-to-`main` allowlist. Readiness checks validate configuration only; they do not contact GitHub or prove that an installation is usable. Soyuz's durable ledger is deployed; its `KIRISAME` caller binding and dispatch remain off while Kaseki's claim-bound producer is completed. See [Soyuz integration](docs/SOYUZ-INTEGRATION.md).
 
 Production credentials must never appear in source control, test fixtures, application logs or publication artifacts. See the [GitHub App setup guide](docs/GITHUB-APP.md) before configuring a private canary or rotating the key.
 
@@ -353,7 +353,8 @@ New consumers should integrate through an authorised control-plane interface rat
 - **Implemented:** Sanitized structured errors and safe operation logs.
 - **Implemented:** GitHub adapter interface, allowlist policy and deterministic mock publisher.
 - **Implemented:** CI, linting, type checking, contract tests and Worker runtime tests.
-- **Default disabled:** Real GitHub writes, production Service Binding and GitHub credentials.
+- **Implemented:** Real GitHub writes through the private named publisher; production is enabled only for the Somatic PR-to-`main` rule. The public HTTP handler cannot publish.
+- **Not configured:** Soyuz's private `KIRISAME` binding and Soyuz dispatch.
 
 ### Phase 1.1 — Publishing hardening
 
@@ -367,16 +368,15 @@ New consumers should integrate through an authorised control-plane interface rat
 - **Implemented:** Installation lookup, exact-repository and minimum-permission token scoping, expiry checks and fail-closed configuration.
 - **Implemented:** Real GitHub REST Git Data and Pull Requests adapter with bounded requests, tree traversal, pagination, error classification and reconciliation.
 - **Implemented:** Injected-HTTP tests that drive the real publication service through simulated GitHub endpoints.
-- **Pending:** Complete the authorised live canary against `CyanAutomation/somatic` after a positive private authorization preflight.
-- **Implemented:** Configure the existing App secret binding and installation; production writes remain disabled by default.
+- **Completed:** Private live canary against `CyanAutomation/somatic`, including a byte-identical replay that reused the same open PR.
+- **Implemented:** Configure the existing App secret binding and installation; deployed production allowlist is exactly Somatic PRs to `main`.
 
 ### Phase 3 — Soyuz integration
 
-- Establish a private Service Binding between Soyuz and Kirisame.
-- Implement canonical publication authorisation.
-- Define and persist publication lifecycle status.
-- Connect validated execution artifacts to publication requests.
-- Verify idempotency and recovery across service restarts.
+- **Implemented in Soyuz:** Durable publication intents and ledger, request fingerprints, attempt fencing, event history, retry recovery, and manifest retention independent of run culling.
+- **Implemented in source:** Kaseki pins the base SHA, suppresses its legacy publisher for the persisted Kirisame route, and uploads the claim-bound manifest and validation evidence.
+- **Pending:** Roll out the trusted Kaseki producer and Soyuz binding with dispatch off; enable dispatch only after preflight, allowlist, and per-run legacy-publisher checks.
+- **Pending:** Run a new claim-bound end-to-end canary and verify identical replay and retention.
 
 ### Phase 4 — Executor migration
 
@@ -446,4 +446,4 @@ Relevant platform documentation:
 
 ---
 
-**Kirisame is being built as the trusted GitHub publication boundary for CyanAutomation. The current Worker foundation validates requests and exercises publication through a mock; it does not make live GitHub writes.**
+**Kirisame is CyanAutomation's trusted GitHub publication boundary. The production Worker passed a private Somatic PR canary and an identical replay reused the same PR. Soyuz's durable publication ledger is deployed; Kaseki producer and Soyuz binding source are ready, with host rollout and production dispatch still pending.**

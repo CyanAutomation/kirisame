@@ -1,6 +1,6 @@
 # Security policy
 
-Kirisame is the GitHub write boundary. Phase 0.1 contracts, Phase 1.1 hardening, and Phase 2A GitHub App authentication and real REST adapter are implemented. The production Worker has an existing App key secret binding, and the App is installed on `CyanAutomation/somatic`; the App owner accepts the current all-repositories installation and permission levels for commissioning. Production publishing remains disabled (`PUBLISHING_ENABLED=false`) with an empty repository allowlist, and no Soyuz Service Binding is configured. The named publisher therefore returns `PUBLISHING_UNAVAILABLE` for valid requests.
+Kirisame is the GitHub write boundary. Phase 0.1 contracts, Phase 1.1 hardening, and Phase 2A GitHub App authentication and real REST adapter are implemented. The production Worker has an existing App key secret binding, and the App is installed on `CyanAutomation/somatic`; the App owner accepts the current all-repositories installation and permission levels for commissioning. The live canary passed, and production publishing is enabled only for `CyanAutomation/somatic` PRs to `main`. Kaseki producer code is implemented and Soyuz source stages a private binding with dispatch off; those source changes are not yet rolled out. Production Soyuz still has no binding, and dispatch remains off. Code defaults remain fail-closed.
 
 ## GitHub App identity and permissions
 

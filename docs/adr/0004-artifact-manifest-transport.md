@@ -1,16 +1,16 @@
 # ADR 0004: Immutable manifest over the private service interface
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
-Current Soyuz stores generic executor artifacts in private R2 for 30 days. It does not yet store a publication-ready manifest or pin artifacts for a separate publication lifecycle. Current Cloudflare Workers have bounded per-isolate memory and request body limits depend on ingress plan.
+Soyuz stores publication-ready manifests in private R2 and pins them through the separate publication lifecycle. Current Cloudflare Workers have bounded per-isolate memory and request body limits depend on ingress plan.
 
 ## Decision
 
 Define a structured immutable file-change manifest for UTF-8 additions, modifications and deletions. For the first implementation, Soyuz loads the verified manifest from R2 and sends it inline to Kirisame over the private Service Binding. Bound one decoded manifest to 5 MiB content, 100 files, 1 MiB per file, 8 MiB canonical manifest JSON and 9 MiB request body.
 
-Soyuz must retain the artifact while publication is nonterminal and after terminal resolution for the documented recovery window. The Phase 0.1/Phase 1 foundation provisions no R2 resources.
+Soyuz's implemented retention keeps an artifact pinned while publication is nonterminal and for at least 30 days after publication. Production migration `0009` is applied.
 
 ## Alternatives considered
 

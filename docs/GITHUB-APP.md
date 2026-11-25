@@ -2,7 +2,7 @@
 
 ## Current state
 
-Kirisame uses the existing CyanAutomation GitHub App, App ID `3345400`. The code implements App JWT signing, installation resolution, repository-scoped token issuance, and the GitHub Git Data and Pull Requests APIs. The production Worker has the existing App key as a Cloudflare secret binding, and the App is installed on `CyanAutomation/somatic`. The installation currently selects all repositories. The App owner has accepted that scope and the App's current permission levels for this commissioning; no GitHub setting change is required. Publishing remains disabled, the repository allowlist is empty, and no Soyuz Service Binding is configured. The private key value is not stored in this repository.
+Kirisame uses the existing CyanAutomation GitHub App, App ID `3345400`. The code implements App JWT signing, installation resolution, repository-scoped token issuance, and the GitHub Git Data and Pull Requests APIs. The production Worker has the existing App key as a Cloudflare secret binding, and the App is installed on `CyanAutomation/somatic`. The installation currently selects all repositories. The App owner has accepted that scope and the App's current permission levels for this commissioning; no GitHub setting change is required. Production publishing is enabled only for Somatic PRs to `main`; the private canary created PR #128 and an identical replay reused it. The Soyuz private binding and trusted Kaseki producer are not connected yet. The private key value is not stored in this repository.
 
 The App Homepage URL currently points to a general CyanAutomation portfolio page. A link to the Kirisame repository or Worker would describe the integration more clearly. The Homepage URL is descriptive metadata; it is not an OAuth callback URL. Do not change App settings as part of implementation work.
 
@@ -63,7 +63,9 @@ The App JWT uses RS256, sets `iat` 60 seconds in the past, and expires within Gi
 
 Normal CI exercises signing and HTTP behavior using ephemeral keys and mocked GitHub responses. It does not need Cloudflare or GitHub credentials. A successful build or mock test does not prove the live App installation is usable.
 
-## Authorised canary procedure
+## Initial commissioning procedure
+
+The original Kirisame-only commissioning completed successfully as recorded in [Operations](OPERATIONS.md). Its temporary setup and cleanup steps below are historical; current production state is documented at the top of this page and in Operations. A new Soyuz-to-Kirisame end-to-end canary still requires the trusted Kaseki producer and Soyuz's private binding.
 
 The approved Phase 2A.2 target is `CyanAutomation/somatic` with base branch `main`. Do not infer or substitute another repository or branch. Do not use production Soyuz to start the test.
 
@@ -99,6 +101,6 @@ To revoke repository access, remove that repository from the App installation se
 
 Use the rollback process in [Operations](OPERATIONS.md) for Worker versions. After rollback, verify public diagnostics, the disabled publishing state, and any Service Binding configuration. Do not roll back to a version that can expose a public publishing route.
 
-## Requirements before Soyuz integration
+## Requirements for the Soyuz integration
 
-Soyuz production publishing remains out of scope. Before connecting `KIRISAME`, Soyuz must add a durable publication record with a unique publication ID, immutable request fingerprint, compare-and-set attempt lease, retry schedule, append-only history, and artifact retention pin. Soyuz must authorize from canonical run state and trusted validation evidence; executors must provide the v1 manifest under the current claim fence. Then deploy the receiver first, attach a private Service Binding only to Soyuz, and enable Soyuz dispatch in a separately reviewed rollout. See [Soyuz integration](SOYUZ-INTEGRATION.md) and [Phase status](PHASE1-PLAN.md).
+Soyuz owns the durable publication ledger, claim checks, attempt fencing, event history, retry handling, and manifest retention. Migration `0009_durable_publications.sql` is present and applied in production. Kaseki's trusted producer and the Soyuz private binding are implemented in source; the producer host rollout and binding deployment remain pending, with dispatch explicitly off. The remaining release gates are host preflight, verification of the exact Somatic PR-to-`main` allowlist, and a new end-to-end canary with the legacy publisher disabled for that run. Keep publication state in Soyuz; Kirisame does not need a second journal or Durable Object. See [Soyuz integration](SOYUZ-INTEGRATION.md) and [Phase status](PHASE1-PLAN.md).

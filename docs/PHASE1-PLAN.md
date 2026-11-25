@@ -1,6 +1,6 @@
 # Phase 0.1 through Phase 2A status
 
-Phase 0.1 contract hardening, Phase 1 Worker foundations, Phase 1.1 publication hardening, and Phase 2A GitHub App integration code are implemented. The safe build was deployed on 2026-11-22 to `https://kirisame.scheimann.workers.dev/`. The real adapter remains uncommissioned: the checked-in config sets `PUBLISHING_ENABLED=false`, has an empty allowlist, and contains no private key value or Soyuz Service Binding. Public post-deployment probes confirmed root/health 200, readiness 503, and the public publication path 404.
+Phase 0.1 contract hardening, Phase 1 Worker foundations, Phase 1.1 publication hardening, and Phase 2A GitHub App integration are implemented. Production passed a private Somatic PR canary and byte-identical replay reused PR #128. Production publishing is enabled only for `CyanAutomation/somatic` PRs to `main`; the public HTTP surface remains diagnostics-only. Code defaults and checked-in Kirisame configuration remain fail-closed. Soyuz's publication ledger is deployed with migration `0009`; the Kaseki producer and Soyuz binding are staged in source with dispatch disabled but are not yet rolled out.
 
 ## Implemented
 
@@ -22,9 +22,9 @@ Phase 0.1 contract hardening, Phase 1 Worker foundations, Phase 1.1 publication 
 
 The Worker is named `kirisame`, targets account `c40f3cb30efbf8c6d081cf9e50a61931`, and uses `https://kirisame.scheimann.workers.dev/`. Configuration is in [cloudflare.config.ts](../cloudflare.config.ts). The checked-in settings explicitly disable publishing, set App ID `3345400`, leave the optional Client ID empty, declare the App key as a secret binding, and set the allowlist to `[]`.
 
-The public Worker reports publishing unavailable unless the commissioning gate and configuration are valid. Readiness validates configuration only; it does not contact GitHub or prove that an installation is usable. The named publisher uses the real adapter only when explicitly enabled and never falls back to the mock. Production has an existing App key secret binding and App installation; publishing remains disabled with an empty allowlist, and no storage resource or Soyuz Service Binding is configured.
+The public Worker reports publishing unavailable unless the commissioning gate and configuration are valid. Readiness validates configuration only; it does not contact GitHub or prove that an installation is usable. The named publisher uses the real adapter only when explicitly enabled and never falls back to the mock. Production has an existing App key secret binding and App installation. Its publishing gate is enabled only for the exact Somatic PR-to-`main` rule. Production Soyuz has not yet received the binding declared in its source config.
 
-See [Operations](OPERATIONS.md) for local commands, deployment preflight, diagnostics, and rollback. A future Soyuz binding is named `KIRISAME`; the public URL is not the integration endpoint.
+See [Operations](OPERATIONS.md) for local commands, deployment preflight, diagnostics, and rollback. The private Soyuz binding is named `KIRISAME`; the public URL is not the integration endpoint.
 
 ## Developer commands
 
@@ -45,15 +45,14 @@ npm audit
 
 For every valid request, the application validates the contract, provenance, artifact, and repository policy before GitHub state reads. It reads the deterministic publication ref before the current target base ref. A matching branch and matching open PR are confirmed success even after the target branch advances. If no branch exists, the current base must still equal the requested `baseSha` before any Git object is written. If a valid branch has no PR, PR creation requires a fresh base equality check. No-op artifacts are rejected before object creation. The publisher never silently rebases, force-updates a ref, or overwrites a conflicting branch. See [Lifecycle](LIFECYCLE.md) and [ADR 0007](adr/0007-idempotency-reconciliation.md).
 
-## Outstanding before live publication
+## Remaining Soyuz integration gates
 
-- Use the approved Phase 2A.2 target `CyanAutomation/somatic` with base `main`; the App owner accepts the current all-repositories installation and App permission levels for this commissioning.
-- Use the existing `kirisame` production Worker and existing Cloudflare private-key secret; keep the secret value in Cloudflare.
-- Require a positive private authorization preflight, then temporarily enable the exact Somatic PR allowlist for the live canary. Restore `PUBLISHING_ENABLED=false` and `GITHUB_REPOSITORY_ALLOWLIST=[]` immediately afterward.
-- Add a Soyuz publication ledger with a unique `publicationId`, immutable request fingerprint, claim/attempt fencing, retry time, outcome history, and artifact-retention pin.
-- Record and verify trusted execution completion and validation evidence before dispatch; a caller-supplied boolean is not authorization.
-- Produce the v1 immutable manifest in the executor and bind it to the canonical run and current claim fence.
-- Configure `KIRISAME` only on Soyuz after receiver compatibility is reviewed; enable caller dispatch separately.
+- The Phase 2A.2 target is `CyanAutomation/somatic` with base `main`; the App owner accepts the current all-repositories installation and App permission levels. The private canary has passed and production remains enabled only for this exact rule.
+- Keep the existing `kirisame` Worker and its private-key secret in Cloudflare. Do not copy the key to Kaseki or the coding container.
+- Production D1 already records Soyuz migration `0009`. Soyuz source declares the private `KIRISAME` binding, exact Somatic PR-to-`main` allowlist, and `PUBLICATION_DISPATCH_ENABLED=false`; deploy only after producer-host readiness is verified.
+- Kaseki source now pins the base SHA, persists a per-run publication route, suppresses direct publishing for the Somatic PR-to-`main` Kirisame route, and uploads the claim-bound manifest/evidence. The trusted execution host still needs the rollout and host preflight.
+- Run a new canonical end-to-end canary with a new run/publication ID and the legacy publisher disabled for that run. Verify manifest upload, validation evidence, intent, D1 events, private RPC result, PR creation, identical replay, and retention through retryable/blocked states and 30 days after publication.
+- Keep merging or cleaning up the canary PR manual. Do not add a second publication journal or Durable Object to Kirisame.
 - Migrate Kaseki publication in a staged cutover. Rusty-Fossil will use the same contract when its executor exists.
 
-Do not enable production GitHub writes until these controls and cross-repository rollout are reviewed. Do not change Soyuz, Kaseki-Agent, or Rusty-Fossil in this repository's implementation PR.
+Keep Soyuz dispatch off until these controls and cross-repository rollout are reviewed. Do not change Soyuz, Kaseki-Agent, or Rusty-Fossil in a Kirisame-only implementation change.
