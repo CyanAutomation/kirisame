@@ -5,7 +5,6 @@ const SAFE_MESSAGES: Record<PublicationErrorCode, string> = {
   INVALID_REQUEST: "The publication request is invalid.",
   UNSUPPORTED_VERSION: "The publication contract version is not supported.",
   UNAUTHORIZED_CALLER: "The publication caller is not authorized.",
-  REPOSITORY_NOT_ALLOWED: "The requested repository is not allowed.",
   APP_NOT_INSTALLED: "The publishing application is not installed for this repository.",
   GITHUB_PERMISSION_DENIED: "The publishing application lacks the required repository permission.",
   ARTIFACT_INVALID: "The publication artifact is invalid or uses an unsupported feature.",

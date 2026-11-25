@@ -87,7 +87,7 @@ export class MockGitHubAdapter implements GitHubAdapter {
   async moveBase(repository: Repository, baseRef: string): Promise<string> {
     const state = this.#repo(repository);
     const current = state.refs.get(refName(baseRef));
-    if (!current) throw new PublicationFailure("REPOSITORY_NOT_ALLOWED");
+    if (!current) throw new PublicationFailure("BASE_MOVED");
     const currentCommit = state.commits.get(current);
     if (!currentCommit) throw new PublicationFailure("INTERNAL_ERROR");
     const message = `mock moved base ${baseRef}`;
@@ -296,7 +296,7 @@ export class MockGitHubAdapter implements GitHubAdapter {
 
   #repo(repository: Repository): MockRepositoryState {
     const value = this.#repositories.get(repositoryKey(repository));
-    if (!value) throw new PublicationFailure("REPOSITORY_NOT_ALLOWED");
+    if (!value) throw new PublicationFailure("INTERNAL_ERROR");
     return value;
   }
 

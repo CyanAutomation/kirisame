@@ -9,23 +9,30 @@ const TEST_FILE_PATH = "kirisame-canary/verification.txt";
 const TEST_FILE_CONTENT = "Kirisame live integration test.\n";
 const TEST_PR_TITLE = "test: verify Kirisame GitHub App publication";
 const TEST_PR_BODY = "Controlled integration test of Kirisame's GitHub App authentication, branch creation, PR publication and idempotent replay.";
-const ALLOWLIST_PROBE_TARGET = {
+const APP_SCOPE_PROBE_TARGET = {
   owner: "cyanautomation",
-  repository: "kirisame-policy-probe-never-create",
+  repository: "kirisame-app-scope-probe-never-create",
   baseRef: "main",
 } as const;
 
 interface PublisherBinding {
+  publish(requestJson: string, callerId: string, apiKey: string): Promise<PublisherResponse>;
+  verifyCanaryAuthorization(callerId: string, apiKey: string): Promise<CanaryAuthorizationResult>;
+}
+
+interface AuthorizedPublisher {
   publish(requestJson: string): Promise<PublisherResponse>;
   verifyCanaryAuthorization(): Promise<CanaryAuthorizationResult>;
 }
 
 interface WorkflowEnvironment {
   KIRISAME: PublisherBinding;
+  KIRISAME_CALLER_ID: string;
+  KIRISAME_API_KEY: string;
 }
 
 interface WorkflowParameters {
-  action?: "preflight" | "allowlist-probe" | "publish";
+  action?: "preflight" | "app-scope-probe" | "publish";
   requestJson: unknown;
 }
 
@@ -68,27 +75,28 @@ export type LiveCanaryPreflightOutcome = CanaryAuthorizationResult
     failureStage: SafePreflightFailureStage;
   };
 
-export type LiveCanaryAllowlistProbeOutcome =
-  | { status: "rejected"; code: "CANARY_INVALID_REQUEST" | "CANARY_PROBE_POLICY_DENIED" }
-  | { status: "uncertain"; code: "CANARY_ALLOWLIST_PROBE_UNCERTAIN" }
-  | { status: "confirmed-denial"; response: PublisherResponse }
+export type LiveCanaryAppScopeProbeOutcome =
+  | { status: "rejected"; code: "CANARY_INVALID_REQUEST" | "CANARY_APP_SCOPE_PROBE_DENIED" }
+  | { status: "uncertain"; code: "CANARY_APP_SCOPE_PROBE_UNCERTAIN" }
+  | { status: "confirmed-app-denial"; response: PublisherResponse }
   | { status: "unexpected"; response: PublisherResponse };
 
 export class LiveCanaryWorkflow extends WorkflowEntrypoint<WorkflowEnvironment, WorkflowParameters> {
   async run(
     event: WorkflowEvent<WorkflowParameters>,
     step: WorkflowStep,
-  ): Promise<LiveCanaryOutcome | LiveCanaryPreflightOutcome | LiveCanaryAllowlistProbeOutcome> {
+  ): Promise<LiveCanaryOutcome | LiveCanaryPreflightOutcome | LiveCanaryAppScopeProbeOutcome> {
     const parameters = parseWorkflowParameters(event.payload);
     const durableStep = step as unknown as DurableStep;
-    if (parameters?.action === "preflight") return runLiveCanaryPreflight(this.env.KIRISAME, durableStep);
-    if (parameters?.action === "allowlist-probe") {
-      return runLiveCanaryAllowlistProbe(parameters.requestJson, this.env.KIRISAME, durableStep);
+    const publisher = withCallerCredentials(this.env.KIRISAME, this.env.KIRISAME_CALLER_ID, this.env.KIRISAME_API_KEY);
+    if (parameters?.action === "preflight") return runLiveCanaryPreflight(publisher, durableStep);
+    if (parameters?.action === "app-scope-probe") {
+      return runLiveCanaryAppScopeProbe(parameters.requestJson, publisher, durableStep);
     }
     if (parameters?.action !== undefined && parameters.action !== "publish") {
       return { status: "rejected", code: "CANARY_INVALID_REQUEST" };
     }
-    return runLiveCanary(parameters?.requestJson, this.env.KIRISAME, durableStep);
+    return runLiveCanary(parameters?.requestJson, publisher, durableStep);
   }
 }
 
@@ -107,7 +115,7 @@ function parseWorkflowParameters(value: unknown): WorkflowParameters | undefined
 }
 
 export async function runLiveCanaryPreflight(
-  publisher: Pick<PublisherBinding, "verifyCanaryAuthorization">,
+  publisher: Pick<AuthorizedPublisher, "verifyCanaryAuthorization">,
   step: DurableStep,
 ): Promise<LiveCanaryPreflightOutcome> {
   try {
@@ -148,31 +156,31 @@ function safeWorkflowFailureName(error: unknown): SafeWorkflowFailureName {
   return error.name as SafeWorkflowFailureName;
 }
 
-export async function runLiveCanaryAllowlistProbe(
+export async function runLiveCanaryAppScopeProbe(
   requestJson: unknown,
-  publisher: Pick<PublisherBinding, "publish">,
+  publisher: Pick<AuthorizedPublisher, "publish">,
   step: DurableStep,
-): Promise<LiveCanaryAllowlistProbeOutcome> {
+): Promise<LiveCanaryAppScopeProbeOutcome> {
   if (typeof requestJson !== "string") return { status: "rejected", code: "CANARY_INVALID_REQUEST" };
-  const request = await validateLiveCanaryRequest(requestJson, ALLOWLIST_PROBE_TARGET);
+  const request = await validateLiveCanaryRequest(requestJson, APP_SCOPE_PROBE_TARGET);
   if (request === "invalid") return { status: "rejected", code: "CANARY_INVALID_REQUEST" };
-  if (request === "out-of-scope") return { status: "rejected", code: "CANARY_PROBE_POLICY_DENIED" };
+  if (request === "out-of-scope") return { status: "rejected", code: "CANARY_APP_SCOPE_PROBE_DENIED" };
 
   let response: PublisherResponse;
   try {
-    response = await step.do("production-repository-allowlist-denial-probe", NO_AUTOMATIC_RETRIES, () =>
+    response = await step.do("github-app-installation-scope-probe", NO_AUTOMATIC_RETRIES, () =>
       publisher.publish(requestJson));
   } catch {
-    return { status: "uncertain", code: "CANARY_ALLOWLIST_PROBE_UNCERTAIN" };
+    return { status: "uncertain", code: "CANARY_APP_SCOPE_PROBE_UNCERTAIN" };
   }
-  return isRepositoryDenied(response)
-    ? { status: "confirmed-denial", response }
+  return isAppScopeDenied(response)
+    ? { status: "confirmed-app-denial", response }
     : { status: "unexpected", response };
 }
 
 export async function runLiveCanary(
   requestJson: unknown,
-  publisher: Pick<PublisherBinding, "publish">,
+  publisher: Pick<AuthorizedPublisher, "publish">,
   step: DurableStep,
 ): Promise<LiveCanaryOutcome> {
   if (typeof requestJson !== "string") return { status: "rejected", code: "CANARY_INVALID_REQUEST" };
@@ -199,7 +207,7 @@ export async function runLiveCanary(
 
 async function validateLiveCanaryRequest(
   value: unknown,
-  target: typeof CANARY_PUBLICATION_TARGET | typeof ALLOWLIST_PROBE_TARGET = CANARY_PUBLICATION_TARGET,
+  target: typeof CANARY_PUBLICATION_TARGET | typeof APP_SCOPE_PROBE_TARGET = CANARY_PUBLICATION_TARGET,
 ): Promise<PublicationRequest | "invalid" | "out-of-scope"> {
   if (typeof value !== "string" || utf8(value).byteLength > MAX_REQUEST_BODY_BYTES) return "invalid";
 
@@ -218,7 +226,7 @@ async function validateLiveCanaryRequest(
 
 function isWithinLiveCanaryScope(
   request: PublicationRequest,
-  target: typeof CANARY_PUBLICATION_TARGET | typeof ALLOWLIST_PROBE_TARGET,
+  target: typeof CANARY_PUBLICATION_TARGET | typeof APP_SCOPE_PROBE_TARGET,
 ): boolean {
   if (request.repository.owner.toLowerCase() !== target.owner.toLowerCase()
     || request.repository.name.toLowerCase() !== target.repository.toLowerCase()
@@ -240,9 +248,16 @@ function isWithinLiveCanaryScope(
   }
 }
 
-function isRepositoryDenied(response: PublisherResponse): boolean {
-  if ("code" in response) return response.code === "REPOSITORY_NOT_ALLOWED";
-  return response.error?.code === "REPOSITORY_NOT_ALLOWED";
+function isAppScopeDenied(response: PublisherResponse): boolean {
+  if ("code" in response) return response.code === "APP_NOT_INSTALLED" || response.code === "GITHUB_PERMISSION_DENIED";
+  return response.error?.code === "APP_NOT_INSTALLED" || response.error?.code === "GITHUB_PERMISSION_DENIED";
+}
+
+function withCallerCredentials(binding: PublisherBinding, callerId: string, apiKey: string): AuthorizedPublisher {
+  return {
+    publish: (requestJson) => binding.publish(requestJson, callerId, apiKey),
+    verifyCanaryAuthorization: () => binding.verifyCanaryAuthorization(callerId, apiKey),
+  };
 }
 
 function isConfirmedPublication(

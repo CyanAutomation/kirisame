@@ -9,17 +9,7 @@ describe("resolveCanarySettings", () => {
       KIRISAME_CANARY_BASE_REF: " main ",
     });
 
-    expect(settings).toEqual({
-      enabled: true,
-      repository: "CyanAutomation/somatic",
-      baseRef: "main",
-      allowlist: JSON.stringify([{
-        owner: "CyanAutomation",
-        repository: "somatic",
-        operations: ["pr"],
-        baseBranches: ["main"],
-      }]),
-    });
+    expect(settings).toEqual({ enabled: true, repository: "CyanAutomation/somatic", baseRef: "main" });
   });
 
   it.each([
@@ -32,6 +22,6 @@ describe("resolveCanarySettings", () => {
     const settings = resolveCanarySettings(environment);
 
     expect(settings.enabled).toBe(false);
-    expect(settings.allowlist).toBe("[]");
+    expect("allowlist" in settings).toBe(false);
   });
 });

@@ -8,7 +8,6 @@ import { MockGitHubAdapter } from "../../src/github/MockGitHubAdapter.js";
 import { RealGitHubAdapter } from "../../src/github/RealGitHubAdapter.js";
 import type { PullRequestRecord } from "../../src/github/types.js";
 import { PublicationService } from "../../src/publication/service.js";
-import { AllowlistedPublicationPolicy } from "../../src/publication/policy.js";
 import { generateTestGitHubAppKeys } from "./github-test-utils.js";
 
 const fixedNow = 1_800_000_000_000;
@@ -18,7 +17,7 @@ describe("HTTP-backed GitHub publication", () => {
     const request = await makeRequest("pr");
     const backend = await createHttpGitHubBackend(request.repository);
     const adapter = new RealGitHubAdapter(backend.keys.credentials, { fetch: backend.fetch, now: () => fixedNow });
-    const service = new PublicationService(adapter, new AllowlistedPublicationPolicy([request.repository]));
+    const service = new PublicationService(adapter);
 
     const first = await service.publish(request);
     const replay = await service.publish(request);
@@ -36,7 +35,7 @@ describe("HTTP-backed GitHub publication", () => {
     const request = await makeRequest("branch");
     const backend = await createHttpGitHubBackend(request.repository, { loseMutationResponse: "/git/refs" });
     const adapter = new RealGitHubAdapter(backend.keys.credentials, { fetch: backend.fetch, now: () => fixedNow });
-    const service = new PublicationService(adapter, new AllowlistedPublicationPolicy([request.repository]));
+    const service = new PublicationService(adapter);
 
     const result = await service.publish(request);
 
@@ -48,7 +47,7 @@ describe("HTTP-backed GitHub publication", () => {
     const request = await makeRequest("pr");
     const backend = await createHttpGitHubBackend(request.repository, { loseMutationResponse: "/pulls" });
     const adapter = new RealGitHubAdapter(backend.keys.credentials, { fetch: backend.fetch, now: () => fixedNow });
-    const service = new PublicationService(adapter, new AllowlistedPublicationPolicy([request.repository]));
+    const service = new PublicationService(adapter);
 
     const result = await service.publish(request);
 
@@ -57,16 +56,16 @@ describe("HTTP-backed GitHub publication", () => {
     expect(backend.calls.filter((call) => call.method === "POST" && call.path.endsWith("/pulls"))).toHaveLength(1);
   });
 
-  it("rejects a repository before making any GitHub request", async () => {
+  it("delegates repository eligibility to the GitHub App installation", async () => {
     const request = await makeRequest("branch");
     const backend = await createHttpGitHubBackend(request.repository);
     const adapter = new RealGitHubAdapter(backend.keys.credentials, { fetch: backend.fetch, now: () => fixedNow });
-    const service = new PublicationService(adapter, new AllowlistedPublicationPolicy([]));
+    const service = new PublicationService(adapter);
 
     const result = await service.publish(request);
 
-    expect(result.error?.code).toBe("REPOSITORY_NOT_ALLOWED");
-    expect(backend.calls).toEqual([]);
+    expect(result.outcome).toBe("branch_published");
+    expect(backend.calls.some((call) => call.path === `/repos/${request.repository.owner}/${request.repository.name}/installation`)).toBe(true);
   });
 });
 

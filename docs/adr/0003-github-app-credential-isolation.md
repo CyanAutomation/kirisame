@@ -10,7 +10,7 @@ The existing Kirisame App is intended for machine-to-machine GitHub publication.
 
 Kirisame uses the dedicated GitHub App, numeric App ID 3345400, GitHub App JWT authentication and short-lived installation access tokens. The private key is stored only in trusted Kirisame Worker secret configuration. Do not use a personal access token or GitHub user OAuth.
 
-Initial permissions are Metadata read, Contents read/write and Pull requests read/write. Installation tokens are restricted to the exact authorized repository and minimum permissions required.
+Installation tokens are restricted to the exact repository requested by an authenticated caller and the minimum permissions required. Kirisame does not maintain a repository allowlist; the caller owns repository selection policy, while GitHub installation selection and permissions cap the App's capabilities.
 
 ## Alternatives considered
 
@@ -24,7 +24,7 @@ This follows the Kirisame charter and separates app identity from execution. Git
 
 ## Consequences and trade-offs
 
-Kirisame handles JWT signing and token issuance in the private Worker runtime. App installation and the exact Kirisame repository/mode/base-branch allowlist remain separate gates. The implementation verifies App identity, installation owner/suspension/permissions, exact token repository scope, permission scope and expiry. The adapter retains the token only in its request-local instance. No key, installation, allowlist, caller binding or production publishing flag was configured by Phase 2A.
+Kirisame handles JWT signing and token issuance in the private Worker runtime. The implementation verifies App identity, installation owner/suspension/permissions, exact token repository scope, permission scope and expiry. The adapter retains the token only in its request-local instance. The initial Phase 2A code did not configure caller keys or production publishing; the later private caller authentication model is recorded in [ADR 0009](0009-private-rpc-caller-authentication.md).
 
 The Worker-compatible implementation accepts unencrypted RSA PKCS#1 and PKCS#8 PEM keys. It signs RS256 JWTs with `iat` 60 seconds in the past and a maximum 10-minute lifetime, using the Client ID as issuer when configured and otherwise the App ID. Runtime logs contain only safe API categories, status, outcome and duration. See [GitHub App setup](../GITHUB-APP.md) for the controlled configuration and rotation procedure.
 

@@ -7,9 +7,8 @@ export interface WorkerSettings {
   canaryEnabled: boolean;
   canaryRepository: string;
   canaryBaseRef: string;
-  canaryAllowlist: string;
   publishingEnabled: boolean;
-  repositoryAllowlist: string;
+  callerId?: string;
   sourceSha: string;
   appVersion: string;
   buildTimestamp: string;
@@ -34,10 +33,9 @@ export function resolveWorkerSettings(
     canaryEnabled: canary.enabled,
     canaryRepository: canary.repository,
     canaryBaseRef: canary.baseRef,
-    canaryAllowlist: canary.allowlist,
     publishingEnabled,
-    repositoryAllowlist: canaryReceiver ? canary.allowlist
-      : publishingEnabled ? environment?.GITHUB_REPOSITORY_ALLOWLIST ?? "[]" : "[]",
+    ...(canaryHarness ? { callerId: "kirisame-canary-harness" }
+      : workflowInvoker ? { callerId: "kirisame-live-invoker" } : {}),
     sourceSha: environment?.GITHUB_SHA ?? "unknown",
     appVersion: environment?.KIRISAME_APP_VERSION ?? "0.1.0",
     buildTimestamp: environment?.KIRISAME_BUILD_TIMESTAMP ?? "unknown",

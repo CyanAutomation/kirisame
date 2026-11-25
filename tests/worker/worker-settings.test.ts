@@ -28,7 +28,7 @@ describe("Cloudflare worker settings", () => {
       workerName: "kirisame-canary-harness",
       canaryHarness: true,
       publishingEnabled: false,
-      repositoryAllowlist: "[]",
+      callerId: "kirisame-canary-harness",
     });
   });
 
@@ -37,21 +37,17 @@ describe("Cloudflare worker settings", () => {
       workerName: "kirisame-canary",
       canaryHarness: false,
       publishingEnabled: true,
-      repositoryAllowlist: canary.allowlist,
       sourceSha: "abc123",
     });
     expect(resolveWorkerSettings("production", canary, {})).toMatchObject({
       workerName: "kirisame",
       publishingEnabled: false,
-      repositoryAllowlist: "[]",
     });
     expect(resolveWorkerSettings("production", canary, {
       PUBLISHING_ENABLED: "true",
-      GITHUB_REPOSITORY_ALLOWLIST: '[{"owner":"CyanAutomation","repository":"somatic","operations":["pr"],"baseBranches":["main"]}]',
     })).toMatchObject({
       workerName: "kirisame",
       publishingEnabled: true,
-      repositoryAllowlist: '[{"owner":"CyanAutomation","repository":"somatic","operations":["pr"],"baseBranches":["main"]}]',
     });
   });
 
@@ -61,7 +57,7 @@ describe("Cloudflare worker settings", () => {
       canaryHarness: false,
       workflowInvoker: true,
       publishingEnabled: false,
-      repositoryAllowlist: "[]",
+      callerId: "kirisame-live-invoker",
     });
   });
 

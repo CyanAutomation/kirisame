@@ -14,6 +14,8 @@ const enabled = {
   KIRISAME_CANARY_ENABLED: "true",
   KIRISAME_CANARY_REPOSITORY: "CyanAutomation/somatic",
   KIRISAME_CANARY_BASE_REF: "main",
+  KIRISAME_CALLER_ID: "kirisame-canary-harness",
+  KIRISAME_API_KEY: "A".repeat(43),
 };
 
 beforeAll(async () => {
@@ -22,17 +24,20 @@ beforeAll(async () => {
 
 describe("private canary harness", () => {
   it("calls the named publisher entrypoint twice with the identical authorized request", async () => {
-    const calls: string[] = [];
+    const calls: Array<[string, string, string]> = [];
     const publisher = {
-      publish: async (value: string): Promise<PublisherResponse> => {
-        calls.push(value);
+      publish: async (value: string, callerId: string, apiKey: string): Promise<PublisherResponse> => {
+        calls.push([value, callerId, apiKey]);
         return publicationResult.value as PublisherResponse;
       },
     };
     const response = await handleCanaryRequest(localRequest(requestJson), { ...enabled, KIRISAME: publisher });
 
     expect(response.status).toBe(200);
-    expect(calls).toEqual([requestJson, requestJson]);
+    expect(calls).toEqual([
+      [requestJson, "kirisame-canary-harness", "A".repeat(43)],
+      [requestJson, "kirisame-canary-harness", "A".repeat(43)],
+    ]);
     expect(await response.json()).toMatchObject({
       first: { outcome: "pr_published" },
       replay: { outcome: "pr_published" },
@@ -99,7 +104,7 @@ describe("private canary harness", () => {
       let called = false;
       const response = await handleCanaryRequest(localRequest(request), {
         ...enabled,
-        KIRISAME: { publish: async () => { called = true; return publicationResult.value as PublisherResponse; } },
+      KIRISAME: { publish: async () => { called = true; return publicationResult.value as PublisherResponse; } },
       });
 
       expect(response.status).toBe(403);
@@ -112,6 +117,18 @@ describe("private canary harness", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: "CANARY_UNAVAILABLE" });
+  });
+
+  it("fails closed when the caller API key is missing", async () => {
+    let called = false;
+    const response = await handleCanaryRequest(localRequest(requestJson), {
+      ...enabled,
+      KIRISAME_API_KEY: undefined,
+      KIRISAME: { publish: async () => { called = true; return publicationResult.value as PublisherResponse; } },
+    });
+
+    expect(response.status).toBe(503);
+    expect(called).toBe(false);
   });
 
   it("rejects malformed JSON before calling the publisher", async () => {

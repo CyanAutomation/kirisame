@@ -1,6 +1,6 @@
 # Security policy
 
-Kirisame is the GitHub write boundary. Phase 0.1 contracts, Phase 1.1 hardening, and Phase 2A GitHub App authentication and real REST adapter are implemented. The production Worker has an existing App key secret binding, and the App is installed on `CyanAutomation/somatic`; the App owner accepts the current all-repositories installation and permission levels for commissioning. The live canary passed, and production publishing is enabled only for `CyanAutomation/somatic` PRs to `main`. Kaseki producer code is implemented and Soyuz source stages a private binding with dispatch off; those source changes are not yet rolled out. Production Soyuz still has no binding, and dispatch remains off. Code defaults remain fail-closed.
+Kirisame is the GitHub write boundary. Phase 0.1 contracts, Phase 1.1 hardening, and Phase 2A GitHub App authentication and the real REST adapter are implemented. The last deployed release used a receiver-side Somatic allowlist and passed the live canary. The target RPC authenticates each service with its own Worker secret and removes Kirisame's repository allowlist. The current App installation selects all repositories and has the grants listed below; it does not currently narrow the caller's repository choice. Soyuz's authenticated binding source is merged with dispatch disabled; Kaseki's trusted producer still needs host rollout. Keep code defaults fail-closed.
 
 ## GitHub App identity and permissions
 
@@ -17,7 +17,7 @@ The intended machine identity is the existing Kirisame GitHub App owned by CyanA
 
 The GitHub Git Trees and Git Commits endpoints require Contents write; creating a pull request requires Pull requests write. Editing GitHub Actions workflow files requires a separate Workflows permission, which is outside v1. Kirisame must reject changes under .github/workflows rather than request that permission. Verify endpoint permissions against [GitHub's permission guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app), [Git Trees API](https://docs.github.com/en/rest/git/trees), [Git Commits API](https://docs.github.com/en/rest/git/commits), and [Pull Requests API](https://docs.github.com/en/rest/pulls/pulls).
 
-Generate an installation token only after repository policy checks. Request access to exactly the owner/repository being published and only the permissions required for the selected mode. GitHub permits scoping installation tokens by repository and permission, and the token expires after one hour; see [installation access token guidance](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app). Never return a token to Soyuz or executors.
+Generate an installation token only after caller authentication and request validation. Request access to exactly the owner/repository in the request and only the permissions required for the selected mode. GitHub permits scoping installation tokens by repository and permission, and the token expires after one hour; see [installation access token guidance](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app). Never return a token to Soyuz or executors.
 
 The App private key belongs only in Kirisame's trusted Worker secret configuration. Do not place it on Kaseki or Rusty-Fossil hosts, in a Queue message, D1, R2, a source file, a fixture, or a log. The numeric App ID is not secret. Redact both GitHub JWTs and installation tokens from exceptions, HTTP traces and diagnostics. Do not log raw GitHub response bodies.
 
@@ -28,7 +28,9 @@ The GitHub App settings were reviewed on 2026-11-24. The App owner accepts the c
 - Confirm the App identity is Kirisame, owner CyanAutomation, App ID 3345400.
 - Keep the current grants: Metadata read, Actions read, Checks read/write, Contents read/write, Commit statuses read/write, and Pull requests read/write.
 - Keep the current installation selection of all repositories for this commissioning; the App owner has accepted it.
-- Continue to enforce Kirisame's exact repository allowlist and request installation tokens for exactly the authorized repository with only operation-specific permissions plus Metadata read.
+- Kirisame has no repository allowlist. The App's all-repositories installation currently does not narrow repository choice; if changed to selected repositories, that list is an additional capability ceiling.
+- Require authenticated caller IDs and per-service API keys for every private publication/preflight RPC. Keep one secret per caller and never pass keys in canonical JSON.
+- Request installation tokens for exactly the requested repository with only operation-specific permissions plus Metadata read.
 - Do not add Workflows, Administration, secrets, deployments, or organization permissions.
 - Do not configure a user OAuth flow or rely on the OAuth Client ID for machine authentication.
 - Store the private key only as a Kirisame Worker secret; define a reviewed rotation and revocation procedure before production use.
@@ -37,20 +39,21 @@ The GitHub App settings were reviewed on 2026-11-24. The App owner accepts the c
 
 The runtime signs RS256 App JWTs with `iat` 60 seconds in the past and an expiry no more than 10 minutes after issue time. It accepts the configured App ID or optional Client ID as issuer, supports unencrypted PKCS#1 and PKCS#8 PEM keys, and does not log or persist the key. GitHub's requirements are in [JWT generation guidance](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app).
 
-## Two independent repository gates
+## Caller authentication, caller policy, and App access
 
-A repository is publishable only when both conditions hold:
+These are separate controls:
 
-1. The GitHub App installation has access to that repository.
-2. Kirisame's own explicit allowlist authorizes the exact owner/repository identity and the requested branch/PR operation. Owner and repository names are compared case-insensitively after normalization to lowercase.
+1. **Caller authentication:** the private RPC requires `(requestJson, callerId, apiKey)`. Kirisame checks the ID and secret against `KIRISAME_CALLER_KEYS` before parsing the request. Unknown or invalid credentials return `UNAUTHORIZED_CALLER` without GitHub work.
+2. **Caller repository policy:** Kirisame has no repository allowlist. Each authenticated service is trusted to choose its own target. Soyuz applies `PUBLICATION_REPOSITORY_ALLOWLIST` against canonical run state, currently Somatic PRs to `main`; the live canary and local harness validate their fixed target.
+3. **GitHub App access:** Kirisame resolves the installation for the exact requested repository, checks its identity, suspension and permissions, and requests a token scoped to that repository. The current installation selects all repositories, so it does not restrict repo choice. A selected-repository install would add an independent cap.
 
-Installation does not imply Kirisame policy authorization. Kirisame does not infer permission from a request's repository field, from a caller-selected installation ID, or from the presence of a working token. Resolve the installation from the configured App and exact repository after allowlist validation. `GITHUB_REPOSITORY_ALLOWLIST` is strict JSON with entries containing exactly `owner`, `repository`, `operations`, and `baseBranches`; wildcards and extra fields are rejected. See [GitHub App setup](GITHUB-APP.md) for an example.
+An API key identifies a service; it is not repository authorization. Never issue a key to a coding executor or a service that accepts arbitrary repository names without an authorization check. See [Private RPC authentication and repository policy](PRIVATE-RPC-AUTH.md).
 
 ## Request authentication and provenance
 
-The intended production interface is a private Cloudflare Service Binding called only by Soyuz. The Worker exports a separate named typed-RPC publisher entrypoint, but no production binding is currently configured. Do not expose a public publishing route, accept bearer credentials from executors, or trust identity headers supplied by an HTTP caller. When configured, deployment must attach the binding only to Soyuz; the public default `fetch()` handler must never dispatch to publication logic.
+The intended production interface is a private Cloudflare Service Binding. The Worker exports a separate named typed-RPC publisher entrypoint; Soyuz source declares it with dispatch disabled. Do not expose a public publishing route, accept bearer credentials from executors, or trust identity headers supplied by an HTTP caller. The binding must stay on trusted callers only; the public default `fetch()` handler must never dispatch to publication logic.
 
-Soyuz must load canonical run state and trusted validation evidence, resolve the requested mode, and authorize one stable publicationId before calling Kirisame. Kirisame verifies that the artifact's runId, repository, baseRef and baseSha equal the request, verifies artifactDigest and all file hashes, and applies its independent allowlist. A caller-supplied validationPassed boolean is never sufficient evidence. Current Soyuz callbacks are claim-fenced but do not contain an immutable file-change manifest or a publication authorization record; those remain integration prerequisites.
+Soyuz must load canonical run state and trusted validation evidence, resolve the requested mode and destination, and authorize one stable publicationId before calling Kirisame. Kirisame verifies that artifact runId, repository, baseRef and baseSha equal the request, and verifies artifactDigest and all file hashes. A caller-supplied validationPassed boolean is never sufficient evidence. Soyuz's ledger, claim-fenced artifacts and intents are implemented; the trusted Kaseki host still needs rollout.
 
 ## Branch and repository operation policy
 

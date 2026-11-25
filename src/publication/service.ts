@@ -6,7 +6,6 @@ import { asPublicationFailure, PublicationFailure } from "../errors/publication-
 import type { GitHubAdapter } from "../github/GitHubAdapter.js";
 import { gitBlobSha } from "../github/git-objects.js";
 import type { GitCommit, GitTreeEntry, GitTreeUpdate, PullRequestRecord } from "../github/types.js";
-import type { PublicationPolicy } from "./policy.js";
 import {
   applyArtifactToTree,
   compareExpectedEntries,
@@ -18,11 +17,9 @@ const MARKER = "Kirisame-Publication";
 
 export class PublicationService {
   readonly #adapter: GitHubAdapter;
-  readonly #policy: PublicationPolicy;
 
-  constructor(adapter: GitHubAdapter, policy: PublicationPolicy) {
+  constructor(adapter: GitHubAdapter) {
     this.#adapter = adapter;
-    this.#policy = policy;
   }
 
   async publish(request: PublicationRequest): Promise<PublicationResult> {
@@ -40,7 +37,6 @@ export class PublicationService {
   }
 
   async #publishBranch(request: PublicationRequest): Promise<NonNullable<PublicationResult["branch"]>> {
-    await this.#policy.authorize(request);
     await this.#adapter.resolveRepository(request.repository, request.mode);
     const existingSha = await this.#adapter.readRef(request.repository, `refs/heads/${request.headRef}`);
     if (existingSha) {
