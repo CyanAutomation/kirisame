@@ -49,7 +49,6 @@ export type PublicationErrorCode =
   | "INVALID_REQUEST"
   | "UNSUPPORTED_VERSION"
   | "UNAUTHORIZED_CALLER"
-  | "REPOSITORY_NOT_ALLOWED"
   | "APP_NOT_INSTALLED"
   | "GITHUB_PERMISSION_DENIED"
   | "ARTIFACT_INVALID"
@@ -146,6 +145,7 @@ export type GitHubAppPrivateKeyImportFailureStage =
   | "private_key_crypto_import";
 
 export type CanaryAuthorizationFailureStage =
+  | "caller_authentication"
   | "configuration"
   | GitHubAppPrivateKeyImportFailureStage
   | "github_app_signing"

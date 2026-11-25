@@ -1,6 +1,6 @@
 # Kirisame architecture
 
-**Status:** Phase 0.1 contracts, Phase 1.1 publishing hardening, and Phase 2A GitHub App authentication/adapter implemented. Live GitHub publishing is uncommissioned by default; Soyuz and executor integration remain pending.
+**Status:** Phase 0.1 contracts, Phase 1.1 publishing hardening, and Phase 2A GitHub App authentication/adapter implemented. The last deployed publisher passed a Somatic canary and is enabled for Somatic PRs to `main`; the authenticated caller-key and no-receiver-allowlist follow-up is staged but not deployed. Soyuz dispatch remains off pending Kaseki host rollout and a new canary.
 
 ## Intended system
 
@@ -44,7 +44,7 @@ flowchart LR
 | --- | --- |
 | Coding executors | Code changes, local validation and quality gates, and producing publication artifacts. They receive no GitHub write credential. |
 | Soyuz | Canonical execution identity and state, publication eligibility, publication ID, artifact provenance and retention, and canonical publication lifecycle. |
-| Kirisame | GitHub App authentication, repository and operation policy, verified Git object and branch publication, pull request creation or reconciliation, and sanitized publication results. |
+| Kirisame | Private caller authentication, GitHub App authentication, verified Git object and branch publication, pull request creation or reconciliation, and sanitized publication results. |
 | GitHub | Repository state, commits, branches, pull requests, reviews and repository rules. |
 
 Kirisame does not run coding agents, tests, arbitrary Git commands, merges, or deployments. It does not decide whether a run should be published. It only accepts explicit v1 operations, branch or pr.
@@ -66,11 +66,11 @@ The migration boundary is deliberate: the new Kaseki and future Rusty-Fossil exe
 
 1. **Untrusted execution:** Generated code, repository files, executor output, and claims emitted from a disposable coding environment are untrusted. A success message or validationPassed flag alone grants no write authority.
 2. **Validated but untrusted artifact:** The manifest remains untrusted input after a successful coding run. Soyuz binds it to its canonical run and current worker claim, validates trusted execution evidence, stores it immutably, and authorizes a specific publication. Kirisame still verifies the bytes, digest, paths, operation set and declared base.
-3. **Trusted Soyuz control plane:** Soyuz will read its own canonical run and validation evidence, resolve publishMode, choose the publicationId, lock the artifact to that run, and invoke only an allowed operation. Its Service Binding will be the caller identity for the initial integration.
-4. **Kirisame publication service:** Kirisame accepts requests only through the configured private binding. It validates the complete v1 request, checks its independent repository allowlist and GitHub installation access, and applies its own ref, branch, artifact and token policies.
+3. **Trusted callers:** Soyuz reads canonical run and validation evidence, resolves publishMode and destination, chooses the publicationId, locks the artifact to that run, and applies its own repository policy. Each private caller has a separate API key stored as a Worker secret; the key authenticates the service but does not authorize a repository.
+4. **Kirisame publication service:** Kirisame accepts requests only through authenticated private bindings. It validates the complete v1 request and artifact. It has no repository allowlist; GitHub installation access and permissions limit the operations it can perform. The current App installation selects all repositories, so it does not currently narrow repo selection.
 5. **GitHub:** GitHub is the authority for installed repositories, refs, commit objects, open or closed pull requests, and branch protections. A successful request from Soyuz does not override repository policy or GitHub rules.
 
-The production Worker exposes a separate named typed-RPC `PublisherEntrypoint`; the default public handler cannot dispatch to it. Code defaults are fail-closed. Production publishing is enabled only for the Somatic PR-to-`main` rule and passed its private canary. Kaseki's trusted producer is implemented in source, and Soyuz source declares the private binding with dispatch disabled; production Soyuz has not rolled out that binding or producer yet. Kirisame has no public publishing route. Caller-supplied validation booleans, executor-supplied repository authorization, arbitrary artifact URLs, and arbitrary Git or GitHub operations are never accepted.
+The production Worker exposes a separate named typed-RPC `PublisherEntrypoint`; the default public handler cannot dispatch to it. Code defaults are fail-closed. The previous deployed release was restricted to Somatic PRs to `main` and passed its private canary. Kaseki's trusted producer is implemented in source, and Soyuz's private binding is merged with dispatch disabled; host and secret rollout remain. Kirisame has no public publishing route. Caller-supplied validation booleans, executor-supplied authorization, arbitrary artifact URLs, and arbitrary Git or GitHub operations are never accepted.
 
 ## Publication sequence
 
@@ -85,10 +85,12 @@ sequenceDiagram
   S->>S: verify canonical run, completion, validation evidence and policy
   S->>R: retain immutable manifest under run and publication identity
   S->>S: resolve auto/none; create publication record for branch or pr
-  S->>K: private binding: v1 request plus manifest and digest
-  K->>K: validate contract, provenance, repository policy and manifest
-  K->>G: read installation, target ref and base tree
-  G-->>K: installation and expected base state
+  S->>K: private binding: v1 request, caller ID and separate API key
+  K->>K: authenticate caller; validate contract, provenance and manifest
+  K->>G: check App installation and permissions for requested repo
+  G-->>K: repository-scoped installation token
+  K->>G: read target ref and base tree
+  G-->>K: expected base state
   K->>G: create blobs/tree/commit and create-only feature ref
   G-->>K: branch commit, or a conflict to reconcile
   opt mode is pr

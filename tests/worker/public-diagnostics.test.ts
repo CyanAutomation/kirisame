@@ -6,7 +6,7 @@ describe("public diagnostics", () => {
     const response = await worker.fetch(new Request("https://kirisame.workers.dev/"), {
       PUBLISHING_ENABLED: "false",
       GITHUB_APP_PRIVATE_KEY: "never-return-this-private-key",
-      GITHUB_REPOSITORY_ALLOWLIST: "sensitive-configuration",
+      KIRISAME_CALLER_KEYS: "sensitive-configuration",
       KIRISAME_SOURCE_SHA: "A".repeat(40),
       KIRISAME_APP_VERSION: "0.1.0",
       KIRISAME_CONTRACT_VERSION: "1",

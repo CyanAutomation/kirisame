@@ -8,7 +8,7 @@ import { validateContract } from "../../src/contracts/validate.js";
 import liveCanaryWorker, {
   LiveCanaryWorkflow,
   runLiveCanary,
-  runLiveCanaryAllowlistProbe,
+  runLiveCanaryAppScopeProbe,
   runLiveCanaryPreflight,
 } from "../../src/canary/live-workflow.js";
 import { CANARY_PUBLICATION_TARGET } from "../../src/shared/canary-target.js";
@@ -31,17 +31,17 @@ describe("deployed live canary workflow", () => {
   });
 
   it("dispatches deployed Workflow actions through the private publisher binding", async () => {
-    const probeRequest = await makeCanaryRequest({ owner: "cyanautomation", name: "kirisame-policy-probe-never-create" });
+    const probeRequest = await makeCanaryRequest({ owner: "cyanautomation", name: "kirisame-app-scope-probe-never-create" });
     const denial: PublicationResult = {
       contractVersion: "1",
       publicationId: "019a6000-0000-7000-8000-000000000001",
       runId: "019a6000-0000-7000-8000-000000000002",
-      repository: { owner: "cyanautomation", name: "kirisame-policy-probe-never-create" },
+      repository: { owner: "cyanautomation", name: "kirisame-app-scope-probe-never-create" },
       mode: "pr",
       outcome: "blocked",
       retryable: false,
       reconciliation: "not_needed",
-      error: new PublicationFailure("REPOSITORY_NOT_ALLOWED").toContractError(),
+      error: new PublicationFailure("APP_NOT_INSTALLED").toContractError(),
     };
     const publisher = {
       publish: vi.fn(async (value: string): Promise<PublisherResponse> =>
@@ -49,14 +49,18 @@ describe("deployed live canary workflow", () => {
       verifyCanaryAuthorization: vi.fn(async () => ({ status: "verified" as const, repository: "CyanAutomation/somatic" as const })),
     };
     const workflow = Object.create(LiveCanaryWorkflow.prototype) as LiveCanaryWorkflow;
-    Object.defineProperty(workflow, "env", { value: { KIRISAME: publisher } });
+    Object.defineProperty(workflow, "env", { value: {
+      KIRISAME: publisher,
+      KIRISAME_CALLER_ID: "kirisame-live-invoker",
+      KIRISAME_API_KEY: "A".repeat(43),
+    } });
     const step = directStep as Parameters<LiveCanaryWorkflow["run"]>[1];
     const invoke = (payload: unknown) => workflow.run({ payload } as Parameters<LiveCanaryWorkflow["run"]>[0], step);
 
     await expect(invoke({ action: "preflight" })).resolves.toMatchObject({ status: "verified" });
-    await expect(invoke({ action: "allowlist-probe", requestJson: probeRequest })).resolves.toMatchObject({
-      status: "confirmed-denial",
-      response: { error: { code: "REPOSITORY_NOT_ALLOWED" } },
+    await expect(invoke({ action: "app-scope-probe", requestJson: probeRequest })).resolves.toMatchObject({
+      status: "confirmed-app-denial",
+      response: { error: { code: "APP_NOT_INSTALLED" } },
     });
     await expect(invoke({ action: "unsupported", requestJson: requestJson } as unknown)).resolves.toEqual({
       status: "rejected",
@@ -68,7 +72,9 @@ describe("deployed live canary workflow", () => {
       replay: { outcome: "pr_published" },
     });
     expect(publisher.publish).toHaveBeenCalledTimes(3);
+    expect(publisher.publish).toHaveBeenNthCalledWith(1, probeRequest, "kirisame-live-invoker", "A".repeat(43));
     expect(publisher.verifyCanaryAuthorization).toHaveBeenCalledOnce();
+    expect(publisher.verifyCanaryAuthorization).toHaveBeenCalledWith("kirisame-live-invoker", "A".repeat(43));
   });
 
   it("runs the fixed GitHub App preflight without invoking publication", async () => {
@@ -148,24 +154,24 @@ describe("deployed live canary workflow", () => {
     expect(publisher.publish).not.toHaveBeenCalled();
   });
 
-  it("confirms the production allowlist rejects one fixed nonexistent repository", async () => {
-    const request = await makeCanaryRequest({ owner: "cyanautomation", name: "kirisame-policy-probe-never-create" });
+  it("confirms GitHub App installation scope blocks one fixed uninstalled repository", async () => {
+    const request = await makeCanaryRequest({ owner: "cyanautomation", name: "kirisame-app-scope-probe-never-create" });
     const denial = {
       contractVersion: "1" as const,
       publicationId: "019a6000-0000-7000-8000-000000000001",
       runId: "019a6000-0000-7000-8000-000000000002",
-      repository: { owner: "CyanAutomation", name: "kirisame-policy-probe-never-create" },
+      repository: { owner: "CyanAutomation", name: "kirisame-app-scope-probe-never-create" },
       mode: "pr" as const,
       outcome: "blocked" as const,
       retryable: false,
       reconciliation: "not_needed" as const,
-      error: new PublicationFailure("REPOSITORY_NOT_ALLOWED").toContractError(),
+      error: new PublicationFailure("APP_NOT_INSTALLED").toContractError(),
     };
     const publisher = { publish: vi.fn(async () => denial) };
 
-    await expect(runLiveCanaryAllowlistProbe(request, publisher, directStep)).resolves.toMatchObject({
-      status: "confirmed-denial",
-      response: { outcome: "blocked", error: { code: "REPOSITORY_NOT_ALLOWED" } },
+    await expect(runLiveCanaryAppScopeProbe(request, publisher, directStep)).resolves.toMatchObject({
+      status: "confirmed-app-denial",
+      response: { outcome: "blocked", error: { code: "APP_NOT_INSTALLED" } },
     });
     expect(publisher.publish).toHaveBeenCalledExactlyOnceWith(request);
   });

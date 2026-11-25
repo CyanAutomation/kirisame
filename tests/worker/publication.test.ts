@@ -8,7 +8,6 @@ import { bytesToBase64, sha256Hex, utf8 } from "../../src/contracts/integrity.js
 import { validateResultAgainstRequest } from "../../src/contracts/validate.js";
 import { MockGitHubAdapter } from "../../src/github/MockGitHubAdapter.js";
 import { gitBlobSha } from "../../src/github/git-objects.js";
-import { AllowlistedPublicationPolicy } from "../../src/publication/policy.js";
 import { PublicationService } from "../../src/publication/service.js";
 import { PublisherEntrypoint } from "../../src/entrypoints/publisher.js";
 
@@ -24,8 +23,8 @@ interface TestPublisher {
 const workerExports = exports as unknown as {
   default: typeof exports.default;
   PublisherEntrypoint: {
-    publish(json: string): Promise<PublisherResponse>;
-    verifyCanaryAuthorization(): Promise<CanaryAuthorizationResult>;
+    publish(json: string, callerId: string, apiKey: string): Promise<PublisherResponse>;
+    verifyCanaryAuthorization(callerId: string, apiKey: string): Promise<CanaryAuthorizationResult>;
   };
   MockPublisherEntrypoint: TestPublisher;
 };
@@ -44,10 +43,7 @@ function makeRequest(mode: "branch" | "pr", publicationId?: string): Publication
 async function harness(request: PublicationRequest) {
   const adapter = new MockGitHubAdapter();
   await adapter.seedForRequest(request);
-  const service = new PublicationService(
-    adapter,
-    new AllowlistedPublicationPolicy([request.repository]),
-  );
+  const service = new PublicationService(adapter);
   return { adapter, service };
 }
 
@@ -167,7 +163,7 @@ describe("mock publication application", () => {
   it("blocks multiple PRs that match a publication head and base", async () => {
     const request = makeRequest("pr");
     const { adapter } = await harness(request);
-    const service = new PublicationService(adapter, new AllowlistedPublicationPolicy([request.repository]));
+    const service = new PublicationService(adapter);
     const first = await service.publish(request);
     expect(first.outcome).toBe("pr_published");
 
@@ -671,9 +667,32 @@ describe("private and public Worker entrypoints", () => {
     expect(await validateResultAgainstRequest(request, result)).toEqual([]);
   });
 
+  it.each(["APP_NOT_INSTALLED", "GITHUB_PERMISSION_DENIED"] as const)(
+    "blocks without retry when the GitHub App is not installed or lacks permissions (%s)",
+    async (code) => {
+      const request = makeRequest("pr");
+      const { adapter, service } = await harness(request);
+      adapter.injectFault("resolveRepository", { code });
+
+      const result = await service.publish(request);
+
+      expect(result).toMatchObject({
+        outcome: "blocked",
+        retryable: false,
+        reconciliation: "not_needed",
+        error: { code, classification: "policy" },
+      });
+      expect(adapter.count("createRef")).toBe(0);
+      expect(adapter.count("createPullRequest")).toBe(0);
+      expect(await validateResultAgainstRequest(request, result)).toEqual([]);
+    },
+  );
+
   it("returns an explicit unavailable response from the production private entrypoint", async () => {
     const request = makeRequest("pr");
-    const result = await workerExports.PublisherEntrypoint.publish(JSON.stringify(request));
+    const key = "A".repeat(43);
+    const publisher = productionPublisher({ PUBLISHING_ENABLED: "false", KIRISAME_CALLER_KEYS: JSON.stringify({ soyuz: [key] }) });
+    const result = await publisher.publish(JSON.stringify(request), "soyuz", key);
 
     expect("outcome" in result).toBe(true);
     if (!("outcome" in result)) throw new Error("expected publication result");
@@ -683,22 +702,41 @@ describe("private and public Worker entrypoints", () => {
     expect(await validateResultAgainstRequest(request, result)).toEqual([]);
   });
 
-  it("exposes a read-only fixed-repository preflight while publishing stays disabled", async () => {
-    await expect(workerExports.PublisherEntrypoint.verifyCanaryAuthorization()).resolves.toEqual({
+  it("exposes a read-only fixed-repository preflight to authenticated callers while publishing stays disabled", async () => {
+    const key = "A".repeat(43);
+    const publisher = productionPublisher({
+      PUBLISHING_ENABLED: "false",
+      KIRISAME_CALLER_KEYS: JSON.stringify({ soyuz: [key] }),
+    });
+    await expect(publisher.verifyCanaryAuthorization("soyuz", key)).resolves.toEqual({
       status: "rejected",
       code: "PUBLISHING_UNAVAILABLE",
       failureStage: "configuration",
     });
   });
 
+  it("rejects invalid caller credentials before parsing or processing the request", async () => {
+    const key = "A".repeat(43);
+    const publisher = productionPublisher({ KIRISAME_CALLER_KEYS: JSON.stringify({ soyuz: [key] }) });
+    const response = await publisher.publish("not-json", "soyuz", "B".repeat(43));
+
+    expect(response).toMatchObject({ code: "UNAUTHORIZED_CALLER", classification: "policy" });
+    expect(JSON.stringify(response)).not.toContain(key);
+  });
+
   it("maps preflight failures to a safe result without returning the key", async () => {
     const secret = "private-key-value-must-not-escape";
     const publisher = Object.create(PublisherEntrypoint.prototype) as PublisherEntrypoint;
     Object.defineProperty(publisher, "env", {
-      value: { PUBLISHING_ENABLED: "false", GITHUB_APP_ID: "3345400", GITHUB_APP_PRIVATE_KEY: secret },
+      value: {
+        PUBLISHING_ENABLED: "false",
+        GITHUB_APP_ID: "3345400",
+        GITHUB_APP_PRIVATE_KEY: secret,
+        KIRISAME_CALLER_KEYS: JSON.stringify({ soyuz: ["A".repeat(43)] }),
+      },
     });
 
-    const result = await publisher.verifyCanaryAuthorization();
+    const result = await publisher.verifyCanaryAuthorization("soyuz", "A".repeat(43));
 
     expect(result).toEqual({
       status: "rejected",
@@ -723,3 +761,9 @@ describe("private and public Worker entrypoints", () => {
     expect(await testPublisher.operations()).toEqual([]);
   });
 });
+
+function productionPublisher(environment: Record<string, unknown>): PublisherEntrypoint {
+  const publisher = Object.create(PublisherEntrypoint.prototype) as PublisherEntrypoint;
+  Object.defineProperty(publisher, "env", { value: environment });
+  return publisher;
+}

@@ -14,7 +14,6 @@ export const ERROR_CLASSIFICATIONS = {
   INVALID_REQUEST: "invalid",
   UNSUPPORTED_VERSION: "invalid",
   UNAUTHORIZED_CALLER: "policy",
-  REPOSITORY_NOT_ALLOWED: "policy",
   APP_NOT_INSTALLED: "policy",
   GITHUB_PERMISSION_DENIED: "policy",
   ARTIFACT_INVALID: "invalid",

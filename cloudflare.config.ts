@@ -48,20 +48,26 @@ function workerEnvironment(settings: ReturnType<typeof resolveWorkerSettings>) {
       KIRISAME_CANARY_ENABLED: bindings.text(settings.canaryEnabled ? "true" : "false"),
       KIRISAME_CANARY_REPOSITORY: bindings.text(settings.canaryRepository),
       KIRISAME_CANARY_BASE_REF: bindings.text(settings.canaryBaseRef),
+      KIRISAME_CALLER_ID: bindings.text(settings.callerId ?? "kirisame-canary-harness"),
+      KIRISAME_API_KEY: bindings.secret(),
       KIRISAME: bindings.worker(CANARY_PUBLISHER_BINDING),
     };
   }
 
   if (settings.workflowInvoker) {
-    return { KIRISAME: bindings.worker(LIVE_CANARY_PUBLISHER_BINDING) };
+    return {
+      KIRISAME_CALLER_ID: bindings.text(settings.callerId ?? "kirisame-live-invoker"),
+      KIRISAME_API_KEY: bindings.secret(),
+      KIRISAME: bindings.worker(LIVE_CANARY_PUBLISHER_BINDING),
+    };
   }
 
   return {
     PUBLISHING_ENABLED: bindings.text(settings.publishingEnabled ? "true" : "false"),
     GITHUB_APP_ID: bindings.text("3345400"),
     GITHUB_APP_CLIENT_ID: bindings.text(""),
-    GITHUB_REPOSITORY_ALLOWLIST: bindings.text(settings.repositoryAllowlist),
     GITHUB_APP_PRIVATE_KEY: bindings.secret(),
+    KIRISAME_CALLER_KEYS: bindings.secret(),
     KIRISAME_SOURCE_SHA: bindings.text(settings.sourceSha),
     KIRISAME_APP_VERSION: bindings.text(settings.appVersion),
     KIRISAME_CONTRACT_VERSION: bindings.text("1"),

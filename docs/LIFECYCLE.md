@@ -74,7 +74,7 @@ Do not claim exactly-once GitHub writes. A lost response can occur after a write
 | Classification | Examples | Retryable |
 | --- | --- | --- |
 | invalid | Unsupported contract version, malformed schema, unsafe path, digest mismatch, unsupported file type. | No |
-| policy | Untrusted caller, repository not allowlisted, installation missing, permission denial. | No |
+| policy | Invalid private caller key, missing GitHub App installation, insufficient App permission, or another authorization failure. | No; correct the configuration and reauthorize explicitly. |
 | conflict | Base moved, mismatched pre-existing branch, closed/merged or conflicting PR, or `NO_CHANGES` because the normalized artifact leaves the pinned tree unchanged. | No; a changed artifact requires new authorization and a new publication ID. |
 | retryable | GitHub rate limit, network timeout, 5xx, token endpoint unavailable, or reconciliation itself unavailable. | Yes, using same request after backoff. |
 | internal | Unexpected Kirisame defect with no safe classification. | No by default; inspect redacted diagnostics. |

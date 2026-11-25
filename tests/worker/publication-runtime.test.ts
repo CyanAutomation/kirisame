@@ -7,12 +7,7 @@ import {
 } from "../../src/publication/runtime.js";
 import { generateTestGitHubAppKeys } from "./github-test-utils.js";
 
-const repositoryPolicy = JSON.stringify([{
-  owner: "CyanAutomation",
-  repository: "canary-repo",
-  operations: ["branch", "pr"],
-  baseBranches: ["main"],
-}]);
+const callerKeys = JSON.stringify({ soyuz: ["A".repeat(43)] });
 
 describe("production publication configuration", () => {
   it("verifies only the fixed Somatic PR installation scope while publishing is disabled", async () => {
@@ -50,7 +45,6 @@ describe("production publication configuration", () => {
       PUBLISHING_ENABLED: "false",
       GITHUB_APP_ID: credentials.appId,
       GITHUB_APP_PRIVATE_KEY: credentials.privateKey,
-      GITHUB_REPOSITORY_ALLOWLIST: "[]",
     }, fetcher)).resolves.toEqual({
       status: "verified",
       repository: "CyanAutomation/somatic",
@@ -133,19 +127,16 @@ describe("production publication configuration", () => {
       PUBLISHING_ENABLED: "false",
       GITHUB_APP_ID: credentials.appId,
       GITHUB_APP_PRIVATE_KEY: credentials.privateKey,
-      GITHUB_REPOSITORY_ALLOWLIST: repositoryPolicy,
     })).rejects.toMatchObject({ code: "PUBLISHING_UNAVAILABLE" });
     await expect(isProductionPublishingConfigured({ PUBLISHING_ENABLED: "false" })).resolves.toBe(false);
   });
 
-  it("fails closed for missing secrets, empty or malformed allowlists, and invalid keys", async () => {
+  it("fails closed for missing or invalid GitHub App settings", async () => {
     const { credentials } = await generateTestGitHubAppKeys();
     const base = { PUBLISHING_ENABLED: "true", GITHUB_APP_ID: credentials.appId };
     const incomplete = [
-      { ...base, GITHUB_REPOSITORY_ALLOWLIST: repositoryPolicy },
-      { ...base, GITHUB_APP_PRIVATE_KEY: credentials.privateKey, GITHUB_REPOSITORY_ALLOWLIST: "[]" },
-      { ...base, GITHUB_APP_PRIVATE_KEY: credentials.privateKey, GITHUB_REPOSITORY_ALLOWLIST: "not-json" },
-      { ...base, GITHUB_APP_PRIVATE_KEY: "not-a-private-key", GITHUB_REPOSITORY_ALLOWLIST: repositoryPolicy },
+      base,
+      { ...base, GITHUB_APP_PRIVATE_KEY: "not-a-private-key" },
     ];
 
     for (const environment of incomplete) {
@@ -154,13 +145,12 @@ describe("production publication configuration", () => {
     }
   });
 
-  it("builds a production service without exposing its adapter or policy", async () => {
+  it("builds a production service without any receiver-side repository allowlist", async () => {
     const { credentials } = await generateTestGitHubAppKeys();
     const service = await createProductionPublicationService({
       PUBLISHING_ENABLED: "true",
       GITHUB_APP_ID: credentials.appId,
       GITHUB_APP_PRIVATE_KEY: credentials.privateKey,
-      GITHUB_REPOSITORY_ALLOWLIST: repositoryPolicy,
     });
 
     expect("adapter" in service).toBe(false);
@@ -169,25 +159,10 @@ describe("production publication configuration", () => {
       PUBLISHING_ENABLED: "true",
       GITHUB_APP_ID: credentials.appId,
       GITHUB_APP_PRIVATE_KEY: credentials.privateKey,
-      GITHUB_REPOSITORY_ALLOWLIST: repositoryPolicy,
+      KIRISAME_CALLER_KEYS: callerKeys,
     })).toBe(true);
   });
 
-  it("rejects allowlist entries with wildcards or extra fields", async () => {
-    const { credentials } = await generateTestGitHubAppKeys();
-    const base = {
-      PUBLISHING_ENABLED: "true",
-      GITHUB_APP_ID: credentials.appId,
-      GITHUB_APP_PRIVATE_KEY: credentials.privateKey,
-    };
-    for (const allowlist of [
-      JSON.stringify([{ owner: "*", repository: "repo", operations: ["branch"], baseBranches: ["main"] }]),
-      JSON.stringify([{ owner: "org", repository: "repo", operations: ["branch"], baseBranches: ["main"], installationId: 1 }]),
-    ]) {
-      await expect(createProductionPublicationService({ ...base, GITHUB_REPOSITORY_ALLOWLIST: allowlist }))
-        .rejects.toMatchObject({ code: "PUBLISHING_UNAVAILABLE" });
-    }
-  });
 });
 
 function json(value: unknown, status = 200): Response {
@@ -202,7 +177,6 @@ it("uses only a generic unavailable failure for malformed runtime state", async 
     PUBLISHING_ENABLED: "true",
     GITHUB_APP_ID: "3345400",
     GITHUB_APP_PRIVATE_KEY: "private-key-value-must-not-escape",
-    GITHUB_REPOSITORY_ALLOWLIST: repositoryPolicy,
   }).catch((caught: unknown) => caught);
   expect(error).toBeInstanceOf(PublicationFailure);
   expect((error as Error).message).not.toContain("private-key-value-must-not-escape");

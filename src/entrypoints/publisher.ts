@@ -10,6 +10,7 @@ import type {
 } from "../contracts/types.js";
 import { asPublicationFailure, PublicationFailure } from "../errors/publication-error.js";
 import { PublicationService } from "../publication/service.js";
+import { isAuthorizedPublisherCaller } from "../publication/caller-auth.js";
 import {
   createProductionPublicationService,
   verifyCanaryRepositoryAuthorization,
@@ -23,9 +24,13 @@ type Publish = (request: PublicationRequest, requestId: string) => Promise<Publi
 /** Private typed-RPC entrypoint. Publishing is configuration-gated and is never exposed through public HTTP. */
 export class PublisherEntrypoint extends WorkerEntrypoint {
   // fallow-ignore-next-line unused-class-member -- Invoked by a private Cloudflare Worker Service Binding.
-  async verifyCanaryAuthorization(): Promise<CanaryAuthorizationResult> {
+  async verifyCanaryAuthorization(callerId: string, apiKey: string): Promise<CanaryAuthorizationResult> {
+    const environment = this.env as unknown as PublisherRuntimeEnvironment;
+    if (!(await isAuthorizedPublisherCaller(environment.KIRISAME_CALLER_KEYS, callerId, apiKey))) {
+      return { status: "rejected", code: "UNAUTHORIZED_CALLER", failureStage: "caller_authentication" };
+    }
     try {
-      return await verifyCanaryRepositoryAuthorization(this.env as unknown as PublisherRuntimeEnvironment);
+      return await verifyCanaryRepositoryAuthorization(environment);
     } catch (error) {
       return {
         status: "rejected",
@@ -35,8 +40,11 @@ export class PublisherEntrypoint extends WorkerEntrypoint {
     }
   }
 
-  async publish(requestJson: string): Promise<PublisherResponse> {
+  async publish(requestJson: string, callerId: string, apiKey: string): Promise<PublisherResponse> {
     const environment = this.env as unknown as PublisherRuntimeEnvironment;
+    if (!(await isAuthorizedPublisherCaller(environment.KIRISAME_CALLER_KEYS, callerId, apiKey))) {
+      return new PublicationFailure("UNAUTHORIZED_CALLER").toContractError();
+    }
     return handlePublisherJson(requestJson, async (request, requestId) => {
       if (environment.PUBLISHING_ENABLED !== "true") return unavailableResult(request);
       const service = await createProductionPublicationService(environment, {

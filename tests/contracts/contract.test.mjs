@@ -99,6 +99,16 @@ test('the production-unavailable error is valid under the v1 error contract', as
   assert.deepEqual(result, { valid: true, errors: [] });
 });
 
+test('the v1 error contract no longer exposes receiver-side repository allowlist failures', async () => {
+  const result = await validateContract('publication-error', {
+    code: 'REPOSITORY_NOT_ALLOWED',
+    classification: 'policy',
+    message: 'The requested repository is not allowed.',
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.source === 'schema' && error.keyword === 'enum'));
+});
+
 test('lifecycle event type and state combinations are constrained', async () => {
   const item = await fixture(validDir, 'publication-event.json');
   item.value.type = 'publication.pull_request_created';

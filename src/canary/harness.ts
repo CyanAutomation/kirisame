@@ -5,7 +5,7 @@ import { CANARY_PUBLICATION_TARGET } from "../shared/canary-target.js";
 import { readLimitedBytes } from "../shared/streams.js";
 
 interface CanaryPublisherBinding {
-  publish(requestJson: string): Promise<PublisherResponse>;
+  publish(requestJson: string, callerId: string, apiKey: string): Promise<PublisherResponse>;
 }
 
 interface CanaryEnvironment extends Record<string, unknown> {
@@ -13,12 +13,16 @@ interface CanaryEnvironment extends Record<string, unknown> {
   KIRISAME_CANARY_ENABLED?: unknown;
   KIRISAME_CANARY_REPOSITORY?: unknown;
   KIRISAME_CANARY_BASE_REF?: unknown;
+  KIRISAME_CALLER_ID?: unknown;
+  KIRISAME_API_KEY?: unknown;
 }
 
 interface ConfiguredCanaryEnvironment extends CanaryEnvironment {
   KIRISAME: CanaryPublisherBinding;
   KIRISAME_CANARY_REPOSITORY: string;
   KIRISAME_CANARY_BASE_REF: string;
+  KIRISAME_CALLER_ID: string;
+  KIRISAME_API_KEY: string;
 }
 
 const NOT_FOUND = { code: "NOT_FOUND", message: "Not found" };
@@ -39,7 +43,7 @@ export async function handleCanaryRequest(request: Request, environment: unknown
   if (!isWithinCanaryScope(parsed.publication, canaryEnvironment)) {
     return json({ code: "CANARY_POLICY_DENIED", message: "The request is outside the explicitly configured canary scope." }, 403);
   }
-  return publishAndReplay(parsed.requestJson, canaryEnvironment.KIRISAME);
+  return publishAndReplay(parsed.requestJson, canaryEnvironment);
 }
 
 function isCanaryPublishRequest(request: Request): boolean {
@@ -53,6 +57,8 @@ function readCanaryEnvironment(environment: unknown): ConfiguredCanaryEnvironmen
   return canary.KIRISAME_CANARY_ENABLED === "true"
     && typeof canary.KIRISAME_CANARY_REPOSITORY === "string" && Boolean(canary.KIRISAME_CANARY_REPOSITORY)
     && typeof canary.KIRISAME_CANARY_BASE_REF === "string" && Boolean(canary.KIRISAME_CANARY_BASE_REF)
+    && typeof canary.KIRISAME_CALLER_ID === "string" && Boolean(canary.KIRISAME_CALLER_ID)
+    && typeof canary.KIRISAME_API_KEY === "string" && Boolean(canary.KIRISAME_API_KEY)
     && isPublisherBinding(canary.KIRISAME) ? canary as ConfiguredCanaryEnvironment : undefined;
 }
 
@@ -90,13 +96,13 @@ function isWithinCanaryScope(publication: PublicationRequest, environment: Confi
     && publication.headRef === `kirisame/p/${publication.publicationId}`;
 }
 
-async function publishAndReplay(requestJson: string, publisher: CanaryPublisherBinding): Promise<Response> {
+async function publishAndReplay(requestJson: string, environment: ConfiguredCanaryEnvironment): Promise<Response> {
   try {
-    const first = await publisher.publish(requestJson);
+    const first = await environment.KIRISAME.publish(requestJson, environment.KIRISAME_CALLER_ID, environment.KIRISAME_API_KEY);
     if (!isConfirmedPr(first)) return json({ first, replay: null }, 200);
     let replay: PublisherResponse | null = null;
     try {
-      replay = await publisher.publish(requestJson);
+      replay = await environment.KIRISAME.publish(requestJson, environment.KIRISAME_CALLER_ID, environment.KIRISAME_API_KEY);
     } catch {
       // Preserve the confirmed first result if only the replay call fails.
     }

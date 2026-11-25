@@ -4,7 +4,6 @@ export interface CanarySettings {
   enabled: boolean;
   repository: string;
   baseRef: string;
-  allowlist: string;
 }
 
 export const CANARY_PUBLISHER_BINDING = {
@@ -45,18 +44,9 @@ export function resolveCanarySettings(environment: Record<string, string | undef
     && extra === undefined
     && baseRef === CANARY_PUBLICATION_TARGET.baseRef;
   const enabled = environment.KIRISAME_CANARY_ENABLED === "true" && targetIsValid;
-  const allowlist = enabled
-    ? JSON.stringify([{
-      owner: CANARY_PUBLICATION_TARGET.owner,
-      repository: CANARY_PUBLICATION_TARGET.repository,
-      operations: ["pr"],
-      baseBranches: [CANARY_PUBLICATION_TARGET.baseRef],
-    }])
-    : "[]";
   return {
     enabled,
     repository: enabled ? `${CANARY_PUBLICATION_TARGET.owner}/${CANARY_PUBLICATION_TARGET.repository}` : repository,
     baseRef: enabled ? CANARY_PUBLICATION_TARGET.baseRef : baseRef,
-    allowlist,
   };
 }

@@ -9,17 +9,16 @@ import {
 import { RealGitHubAdapter } from "../github/RealGitHubAdapter.js";
 import { CANARY_PUBLICATION_TARGET } from "../shared/canary-target.js";
 import type { CanaryAuthorizationDiagnosticStep, CanaryAuthorizationResult } from "../contracts/types.js";
+import { hasConfiguredPublisherCallers } from "./caller-auth.js";
 import { runAuthorizationPreflightStage } from "./authorization-preflight.js";
 import { PublicationService } from "./service.js";
-import { parseRepositoryAllowlist } from "./allowlist.js";
-import { RepositoryAllowlistPolicy } from "./policy.js";
 
 export interface PublisherRuntimeEnvironment extends Record<string, unknown> {
   PUBLISHING_ENABLED?: unknown;
   GITHUB_APP_ID?: unknown;
   GITHUB_APP_CLIENT_ID?: unknown;
   GITHUB_APP_PRIVATE_KEY?: unknown;
-  GITHUB_REPOSITORY_ALLOWLIST?: unknown;
+  KIRISAME_CALLER_KEYS?: unknown;
 }
 
 export interface PublicationDiagnosticContext {
@@ -31,7 +30,6 @@ interface PublicationSettings {
   appId: string | undefined;
   clientId: string | undefined;
   privateKey: string | undefined;
-  allowlistJson: string | undefined;
 }
 
 export async function createProductionPublicationService(
@@ -39,14 +37,12 @@ export async function createProductionPublicationService(
   diagnosticContext?: PublicationDiagnosticContext,
 ): Promise<PublicationService> {
   if (environment.PUBLISHING_ENABLED !== "true") throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
-  const { appId, clientId, privateKey, allowlistJson } = readPublicationSettings(environment);
-  if (!appId || !privateKey || !allowlistJson) throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
+  const { appId, clientId, privateKey } = readPublicationSettings(environment);
+  if (!appId || !privateKey) throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
   const credentials: GitHubAppCredentials = { appId, privateKey, ...(clientId ? { clientId } : {}) };
   validateGitHubAppCredentials(credentials);
   await importGitHubAppPrivateKey(privateKey);
-  const rules = parseRepositoryAllowlist(allowlistJson);
-  if (rules.length === 0) throw new PublicationFailure("PUBLISHING_UNAVAILABLE");
-  return new PublicationService(new RealGitHubAdapter(credentials, diagnosticContext), new RepositoryAllowlistPolicy(rules));
+  return new PublicationService(new RealGitHubAdapter(credentials, diagnosticContext));
 }
 
 /** Read-only fixed-scope App and installation-token preflight; deliberately independent of the publishing gate. */
@@ -108,12 +104,12 @@ function rejectedAuthorization(
 export async function isProductionPublishingConfigured(environment: unknown): Promise<boolean> {
   if (!isRecord(environment) || environment.PUBLISHING_ENABLED !== "true") return false;
   try {
-    const { appId, clientId, privateKey, allowlistJson } = readPublicationSettings(environment);
-    if (!appId || !privateKey || !allowlistJson) return false;
+    const { appId, clientId, privateKey } = readPublicationSettings(environment);
+    if (!appId || !privateKey || !hasConfiguredPublisherCallers(environment.KIRISAME_CALLER_KEYS)) return false;
     const credentials: GitHubAppCredentials = { appId, privateKey, ...(clientId ? { clientId } : {}) };
     validateGitHubAppCredentials(credentials);
     await importGitHubAppPrivateKey(privateKey);
-    return parseRepositoryAllowlist(allowlistJson).length > 0;
+    return true;
   } catch {
     return false;
   }
@@ -124,7 +120,6 @@ function readPublicationSettings(environment: Record<string, unknown>): Publicat
     appId: stringValue(environment.GITHUB_APP_ID),
     clientId: stringValue(environment.GITHUB_APP_CLIENT_ID),
     privateKey: stringValue(environment.GITHUB_APP_PRIVATE_KEY),
-    allowlistJson: stringValue(environment.GITHUB_REPOSITORY_ALLOWLIST),
   };
 }
 
