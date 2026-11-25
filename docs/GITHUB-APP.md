@@ -4,7 +4,7 @@
 
 Kirisame uses the CyanAutomation GitHub App, App ID `3345400`, for publication. The production App installation currently selects all repositories. The App owner has accepted the installation scope and current permission grants for commissioning. The App's private key is a Cloudflare Worker secret; its value is not in this repository.
 
-The last deployed publisher used a repository allowlist and a keyless private RPC. This follow-up changes the target design: callers authenticate with per-service API keys, and Kirisame has no repository allowlist. Until the authenticated receiver and callers are deployed together, keep the current production settings and Soyuz dispatch gate in their existing safe state. The release sequence is below.
+The production publisher now authenticates private RPC callers with per-service API keys and has no repository allowlist. At present, only `kirisame-live-invoker` is accepted; its private Worker is fixed to Somatic PRs to `main` and has no public URL or triggers. Soyuz has no caller key or production binding yet, and dispatch remains off. The GitHub App key stays in Cloudflare and was not changed during the receiver rollout.
 
 ## App identity, installation, and permissions
 
@@ -60,11 +60,11 @@ The adapter never returns raw GitHub response bodies. Use access-controlled Clou
 
 The receiver and caller RPC signatures must be deployed as a coordinated rollout. Keep `PUBLICATION_DISPATCH_ENABLED=false` in Soyuz throughout this sequence.
 
-1. Merge and deploy the receiver and caller code with unit tests passing. The new RPC method rejects missing credentials. Keep the existing publishing gate and production allowlist setting until the authenticated path is ready; the new receiver ignores that retired setting.
-2. Generate separate high-entropy keys for `soyuz` and `kirisame-live-invoker`. Set `KIRISAME_CALLER_KEYS` on Kirisame and `KIRISAME_API_KEY` on each caller as Cloudflare Worker secrets; set the non-secret caller IDs in text configuration. Do not print the key values.
-3. Confirm the private `KIRISAME` Service Bindings target `kirisame.PublisherEntrypoint`. Keep public HTTP publishing unavailable. Remove the obsolete `GITHUB_REPOSITORY_ALLOWLIST` Worker variable after the authenticated receiver is deployed.
-4. Invoke the live invoker's authenticated read-only `preflight`. Require `{ status: "verified", repository: "CyanAutomation/somatic" }`. Use `app-scope-probe` and require an `APP_NOT_INSTALLED` or `GITHUB_PERMISSION_DENIED` result for its fixed nonexistent repository; this confirms the GitHub App boundary rather than a Kirisame repository list.
-5. Use a new canonical Soyuz run and publication ID. Ensure Kaseki's legacy publisher is disabled for that run. Confirm the claim-bound manifest/evidence/intent, D1 events, authenticated private RPC result, and resulting PR. Replay the exact request and confirm it reuses the same PR. Keep merge or cleanup manual.
+1. **Complete:** The authenticated receiver is deployed with the publishing gate enabled, caller authentication required, and no receiver-side repository allowlist. Public HTTP remains diagnostics-only.
+2. **Complete for canary:** A distinct key is configured for `kirisame-live-invoker` on both Workers. The live invoker is currently the only accepted caller. Configure a separate Soyuz key only when its trusted caller rollout is ready.
+3. **Complete for canary:** The invoker's only Service Binding targets `kirisame.PublisherEntrypoint`; workers.dev, previews, routes, and schedules are disabled. The obsolete `GITHUB_REPOSITORY_ALLOWLIST` variable has been removed from Kirisame.
+4. **Complete:** The authenticated read-only preflight verified `CyanAutomation/somatic`; the fixed App-scope probe returned `APP_NOT_INSTALLED` for the nonexistent repository.
+5. **Canary replay complete:** The authenticated canary reused the existing open Somatic PR #128 and its byte-identical replay returned the same branch, commit, and PR. A new canonical Soyuz run remains pending until Kaseki's trusted host and Soyuz's production caller are rolled out. Keep merge or cleanup manual.
 6. Keep Soyuz dispatch disabled until the producer-host route and no-dual-publisher checks pass. Then enable dispatch through the existing Soyuz release process. Do not broaden the caller-side repository policy as part of this receiver change.
 
 The older allowlist-denial canary steps in historical operations records describe the previous design. The App-scope probe replaces them for new authenticated canaries.

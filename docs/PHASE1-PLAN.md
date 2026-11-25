@@ -1,6 +1,6 @@
 # Phase 0.1 through Phase 2A status
 
-Phase 0.1 contract hardening, Phase 1 Worker foundations, Phase 1.1 publication hardening, and Phase 2A GitHub App integration are implemented. Production passed a private Somatic PR canary and byte-identical replay reused PR #128. The last deployed publisher uses an exact Somatic PR-to-`main` allowlist; this follow-up replaces that receiver-side rule with per-caller API keys and caller-owned repository policy. The new code is staged but not deployed. Soyuz's publication ledger is deployed with migration `0009`; its private binding is merged with dispatch disabled. The Kaseki producer is merged but its trusted host rollout is pending.
+Phase 0.1 contract hardening, Phase 1 Worker foundations, Phase 1.1 publication hardening, Phase 2A GitHub App integration, and the authenticated caller-key receiver are implemented and deployed. The authenticated preflight and App-scope probe passed, and the canary replay reused PR #128. Production has no receiver-side repository allowlist; only the fixed private live-canary invoker is currently authorized. Soyuz's publication ledger is deployed with migration `0009`; its private binding is implemented in source with dispatch disabled. The Kaseki producer is implemented in source but its trusted-host rollout is pending.
 
 ## Implemented
 
@@ -22,7 +22,7 @@ Phase 0.1 contract hardening, Phase 1 Worker foundations, Phase 1.1 publication 
 
 The Worker is named `kirisame`, targets account `c40f3cb30efbf8c6d081cf9e50a61931`, and uses `https://kirisame.scheimann.workers.dev/`. Configuration is in [cloudflare.config.ts](../cloudflare.config.ts). The checked-in settings explicitly disable publishing, set App ID `3345400`, leave the optional Client ID empty, and declare the App key and `KIRISAME_CALLER_KEYS` as Worker secrets. No repository allowlist is configured in the target source.
 
-The public Worker reports publishing unavailable unless the commissioning gate and configuration are valid. Readiness validates configuration only; it does not contact GitHub or prove that an installation is usable. The named publisher uses the real adapter only when explicitly enabled and never falls back to the mock. Production has an existing App key secret binding and App installation. Its publishing gate is enabled only for the exact Somatic PR-to-`main` rule. Production Soyuz has not yet received the binding declared in its source config.
+The public Worker reports publishing unavailable unless the commissioning gate and configuration are valid. Readiness validates configuration only; it does not contact GitHub or prove that an installation is usable. The named publisher uses the real adapter only when explicitly enabled and never falls back to the mock. Production has an existing App key secret binding and App installation. `PUBLISHING_ENABLED=true` enables the receiver, which has no repository allowlist; each authenticated caller enforces its own repository policy. Production Soyuz has not yet received the binding declared in its source config.
 
 See [Operations](OPERATIONS.md) for local commands, deployment preflight, diagnostics, and rollback. The private Soyuz binding is named `KIRISAME`; the public URL is not the integration endpoint.
 
