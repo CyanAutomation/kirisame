@@ -1,6 +1,6 @@
 # Security policy
 
-Kirisame is the GitHub write boundary. Phase 0.1 contracts, Phase 1.1 hardening, and Phase 2A GitHub App authentication and the real REST adapter are implemented. The last deployed release used a receiver-side Somatic allowlist and passed the live canary. The target RPC authenticates each service with its own Worker secret and removes Kirisame's repository allowlist. The current App installation selects all repositories and has the grants listed below; it does not currently narrow the caller's repository choice. Soyuz's authenticated binding source is merged with dispatch disabled; Kaseki's trusted producer still needs host rollout. Keep code defaults fail-closed.
+Kirisame is the GitHub write boundary. Phase 0.1 contracts, Phase 1.1 hardening, Phase 2A GitHub App authentication, and the authenticated private RPC are implemented and deployed. The production receiver has no repository allowlist; only the private live-canary invoker is currently authorized, with a fixed Somatic PR-to-`main` policy. The current App installation selects all repositories and has the grants listed below; it does not narrow caller repository choice. Soyuz's authenticated binding source is merged with dispatch disabled; Kaseki's trusted producer still needs host rollout. Keep code defaults fail-closed.
 
 ## GitHub App identity and permissions
 

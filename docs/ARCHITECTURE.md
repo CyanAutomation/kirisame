@@ -1,6 +1,6 @@
 # Kirisame architecture
 
-**Status:** Phase 0.1 contracts, Phase 1.1 publishing hardening, and Phase 2A GitHub App authentication/adapter implemented. The last deployed publisher passed a Somatic canary and is enabled for Somatic PRs to `main`; the authenticated caller-key and no-receiver-allowlist follow-up is staged but not deployed. Soyuz dispatch remains off pending Kaseki host rollout and a new canary.
+**Status:** Phase 0.1 contracts, Phase 1.1 publishing hardening, Phase 2A GitHub App authentication/adapter, and authenticated caller-key RPC are implemented and deployed. The authenticated preflight and App-scope probe passed; a replay reused the existing Somatic PR #128. The receiver has no repository allowlist, and only the fixed private canary invoker is currently authorized. Soyuz dispatch remains off pending its caller/host rollout and a new canonical-run canary.
 
 ## Intended system
 

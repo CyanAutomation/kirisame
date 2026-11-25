@@ -1,6 +1,6 @@
 # Phase 0.1 through Phase 2A status
 
-Phase 0.1 contract hardening, Phase 1 Worker foundations, Phase 1.1 publication hardening, and Phase 2A GitHub App integration are implemented. Production passed a private Somatic PR canary and byte-identical replay reused PR #128. The last deployed publisher uses an exact Somatic PR-to-`main` allowlist; this follow-up replaces that receiver-side rule with per-caller API keys and caller-owned repository policy. The new code is staged but not deployed. Soyuz's publication ledger is deployed with migration `0009`; its private binding is merged with dispatch disabled. The Kaseki producer is merged but its trusted host rollout is pending.
+Phase 0.1 contract hardening, Phase 1 Worker foundations, Phase 1.1 publication hardening, Phase 2A GitHub App integration, and the authenticated caller-key receiver are implemented and deployed. The authenticated preflight and App-scope probe passed, and the canary replay reused PR #128. Production has no receiver-side repository allowlist; only the fixed private live-canary invoker is currently authorized. Soyuz's publication ledger is deployed with migration `0009`; its private binding is implemented in source with dispatch disabled. The Kaseki producer is implemented in source but its trusted-host rollout is pending.
 
 ## Implemented
 
