@@ -435,6 +435,7 @@ Commits created by Kirisame may trigger GitHub Actions workflows configured in t
 - [Soyuz integration contract and migration](docs/SOYUZ-INTEGRATION.md)
 - [Cross-project publish mode policy](docs/PUBLISH-MODE-POLICY.md)
 - [Phase 1 implementation plan](docs/PHASE1-PLAN.md)
+- [Private RPC caller authentication and Worker secrets](docs/PRIVATE-RPC-AUTH.md)
 - [Operations and deployment](docs/OPERATIONS.md)
 - [Architecture Decision Records](docs/adr/)
 - [Contract schemas](contracts/v1/) and [fixture tests](tests/contracts/)
