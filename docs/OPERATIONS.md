@@ -63,7 +63,7 @@ curl -i https://kirisame.scheimann.workers.dev/internal/v1/publications
 
 With the checked-in default configuration, `/` returns service identity and `publishing: unavailable`; `/health` returns `200` and `status: ok`; `/readyz` returns `503` and `status: not_ready`; the private HTTP path returns `404`. Unsupported methods on the diagnostic routes return `405`. Headers such as `Authorization` or `x-soyuz-service` never grant publishing access. Readiness checks configuration only and never issue a GitHub token or request.
 
-The private `PublisherEntrypoint.publish(requestJson, callerId, apiKey)` method is a typed RPC surface. The API key is a separate RPC argument and is not part of the immutable publication request. It is not an HTTP route and is not callable through the `workers.dev` URL. Configure the Service Binding only on trusted callers, with a distinct API key Worker secret for each caller. Soyuz dispatch must remain disabled until its producer and host are ready.
+The private `PublisherEntrypoint.publish(requestJson, callerId, apiKey)` method is a typed RPC surface. The API key is a separate RPC argument and is not part of the immutable publication request. It is not an HTTP route and is not callable through the `workers.dev` URL. Configure the Service Binding only on trusted callers, with a distinct API key Worker secret for each caller. Soyuz dispatch must remain disabled until its producer and host are ready. For the JSON format, Cloudflare dashboard steps, Wrangler commands, and rotation procedure, follow the [private RPC caller authentication guide](PRIVATE-RPC-AUTH.md).
 
 ## Private live-canary invocation
 

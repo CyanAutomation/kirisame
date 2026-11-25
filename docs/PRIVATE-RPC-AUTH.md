@@ -16,9 +16,41 @@ The Kirisame Worker has a `KIRISAME_CALLER_KEYS` Worker secret containing a JSON
 }
 ```
 
-Use `wrangler secret put KIRISAME_CALLER_KEYS` for Kirisame and `wrangler secret put KIRISAME_API_KEY` in each caller's Worker. Keep caller IDs in text configuration. Do not put key values in checked-in config, `.dev.vars`, commands, CI output, workflow payloads, or application logs. Missing, malformed, unknown, or mismatched credentials fail closed with `UNAUTHORIZED_CALLER` before request parsing or GitHub work. Comparison uses fixed-size SHA-256 digests and a constant-time byte comparison.
+### Configure the secrets
 
-For rotation, add the new key to the caller's accepted list, update the caller's `KIRISAME_API_KEY`, verify an authenticated private preflight/canary, then remove the old key from `KIRISAME_CALLER_KEYS`. Give every caller its own key; a key authenticates a service identity, not a repository.
+`KIRISAME_CALLER_KEYS` is one JSON object stored as a single Cloudflare Worker secret. It is **not** a comma-separated list. Each property name is a caller ID, and its value is an array of that caller's accepted API key strings. The example above is formatted across lines for readability; paste the complete JSON object as the secret value. Cloudflare stores it as text, and Kirisame parses the JSON when authenticating each private RPC.
+
+For one caller with one active key, the value can be as simple as:
+
+```json
+{"soyuz":["<43-character-api-key>"]}
+```
+
+Use the same caller ID in the JSON property and in the caller Worker's `KIRISAME_CALLER_ID` text setting. Put the matching key string by itself in that caller Worker's `KIRISAME_API_KEY` secret. Use one distinct key per caller.
+
+To create a key, generate 32 random bytes and encode them as unpadded base64url. For example:
+
+```sh
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'
+```
+
+The result should be 43 characters. Handle it as a secret; do not add it to source control, `.dev.vars`, shell commands or logs.
+
+In Cloudflare, open **Workers & Pages**, select the Kirisame Worker, then add a secret named `KIRISAME_CALLER_KEYS` under its settings. Paste the entire JSON object into the secret value and save it. For each caller Worker, add its own `KIRISAME_API_KEY` secret containing only that caller's key. Caller IDs are ordinary text configuration, not secrets.
+
+You can also use Wrangler. Run `npx wrangler secret put KIRISAME_CALLER_KEYS` for Kirisame and paste the full JSON object when prompted. Run `npx wrangler secret put KIRISAME_API_KEY` for each caller and paste only its single key. Confirm the command targets the intended Worker and environment before saving the secret.
+
+The receiver accepts one or two keys per caller, allowing a short overlap during rotation, and supports up to 32 caller IDs. Caller IDs must start with a lowercase letter and contain only lowercase letters, digits, underscores, or hyphens, up to 64 characters. Keys must be 43-character unpadded base64url strings. Invalid JSON, malformed keys, unknown callers, or mismatched credentials fail closed with `UNAUTHORIZED_CALLER` before request parsing or GitHub work. Comparison uses fixed-size SHA-256 digests and a constant-time byte comparison.
+
+To rotate a key without downtime:
+
+1. Generate a new key.
+2. Update the Kirisame secret so that caller's array contains both keys, with the new key first and the current key second.
+3. Update that caller's `KIRISAME_API_KEY` secret to the new key.
+4. Verify the caller with an authenticated private preflight or canary.
+5. Remove the old key from the caller's array in `KIRISAME_CALLER_KEYS`.
+
+A key authenticates a service identity, not a repository.
 
 ## Who chooses the repository
 
