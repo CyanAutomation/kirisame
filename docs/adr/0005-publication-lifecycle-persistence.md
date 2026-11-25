@@ -8,7 +8,7 @@ Kirisame must recover branch creation, PR creation and lost responses. Soyuz own
 
 ## Decision
 
-Keep publication lifecycle and durable attempt history in Soyuz. Its publication record is keyed by publicationId and includes an immutable request fingerprint, CAS dispatch lease, state, next-attempt time, artifact retention pin, safe result and append-only events. Do not create a Kirisame journal or add Kirisame D1, KV, Queue or Durable Object for this design.
+Keep publication lifecycle and durable attempt history in Soyuz. Its publication record is keyed by publicationId and includes an immutable request fingerprint, CAS dispatch lease, state, next-attempt time, a run-bounded artifact retention guard, safe result and append-only events. The guard cannot extend the absolute 90-day deadline. Do not create a Kirisame journal or add Kirisame D1, KV, Queue or Durable Object for this design.
 
 ## Alternatives considered
 
