@@ -1,14 +1,14 @@
 # ADR 0005: Soyuz owns publication lifecycle state
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
-Kirisame must recover branch creation, PR creation and lost responses. Soyuz already owns canonical run state and D1, but it currently has no separate publication record. A completed run's callback may include publishedUrl; Kaseki performs publication before that callback.
+Kirisame must recover branch creation, PR creation and lost responses. Soyuz owns canonical run state and D1, and now stores a separate publication record. A completed legacy run's callback may include publishedUrl; Kaseki's existing legacy path performs publication before that callback.
 
 ## Decision
 
-Keep publication lifecycle and durable attempt history in Soyuz. Add a future publication record keyed by publicationId, with immutable request fingerprint, CAS dispatch lease, state, next-attempt time, artifact retention pin, safe result and append-only events. Do not create a Kirisame journal or add Kirisame D1, KV, Queue or Durable Object for the initial design.
+Keep publication lifecycle and durable attempt history in Soyuz. Its publication record is keyed by publicationId and includes an immutable request fingerprint, CAS dispatch lease, state, next-attempt time, artifact retention pin, safe result and append-only events. Do not create a Kirisame journal or add Kirisame D1, KV, Queue or Durable Object for this design.
 
 ## Alternatives considered
 
@@ -22,4 +22,4 @@ Soyuz is the canonical control plane and already has durable D1 state. GitHub re
 
 ## Consequences and trade-offs
 
-The recommendation depends on a new Soyuz publication record and its compare-and-set serialization. Current run idempotency alone is insufficient. If recovery or concurrency testing shows GitHub state plus Soyuz records cannot prove operation identity, revisit a Kirisame journal with an explicit consistency requirement.
+The decision depends on Soyuz's publication record and its compare-and-set serialization. Run idempotency alone is insufficient. If recovery or concurrency testing shows GitHub state plus Soyuz records cannot prove operation identity, revisit a Kirisame journal with an explicit consistency requirement.

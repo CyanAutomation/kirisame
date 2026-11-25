@@ -4,7 +4,7 @@
 
 ## Context
 
-GitHub may complete a branch or PR mutation while the response is lost. Repeating a request without reading remote state can overwrite an unrelated branch or create a duplicate PR. Soyuz's existing run idempotency ledger does not define a publication operation.
+GitHub may complete a branch or PR mutation while the response is lost. Repeating a request without reading remote state can overwrite an unrelated branch or create a duplicate PR. Soyuz's publication ledger now defines a stable publication operation and fences concurrent or stale attempts.
 
 ## Decision
 
@@ -25,4 +25,4 @@ Deterministic refs and GitHub reads make ambiguous outcomes observable. Soyuz ca
 
 ## Consequences and trade-offs
 
-This is not an exactly-once guarantee. It requires the future Soyuz publication record, request fingerprint, attempt lease and artifact retention pin. Closed or conflicting PRs require a new authorization and publicationId. Concurrent duplicate calls still reconcile against GitHub rather than relying only on a lock. The real adapter and HTTP-backed service tests implement and exercise these rules; the Soyuz ledger and live GitHub canary remain prerequisites to production activation.
+This is not an exactly-once guarantee. It relies on Soyuz's publication record, request fingerprint, attempt lease and artifact retention pin. Closed or conflicting PRs require a new authorization and publicationId. Concurrent duplicate calls still reconcile against GitHub rather than relying only on a lock. The real adapter, HTTP-backed service tests, Soyuz ledger, live GitHub canary, and Kaseki producer source are implemented. The trusted-host rollout and Soyuz production binding deployment remain before the new end-to-end flow can be activated.
