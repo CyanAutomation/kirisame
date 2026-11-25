@@ -29,7 +29,7 @@ export async function isAuthorizedPublisherCaller(
   for (const acceptedKey of acceptedKeys) {
     matched |= constantTimeEqual(candidateDigest, await sha256(acceptedKey)) ? 1 : 0;
   }
-  return matched === 1;
+  return matched !== 0;
 }
 
 function parseCallerKeyMap(configuration: unknown): CallerKeyMap | undefined {
