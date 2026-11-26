@@ -18,13 +18,13 @@ export function createScriptedHttpFetch(handler: typeof fetch, rules: readonly H
   return async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     const method = init?.method ?? (input instanceof Request ? input.method : "GET");
-    let fault = state.find((entry) => entry.remaining > 0 && entry.skip === 0
+    const fault = state.find((entry) => entry.remaining > 0 && entry.skip === 0
       && entry.rule.method === method && url.pathname.endsWith(entry.rule.pathSuffix));
     if (fault) fault.remaining -= 1;
     else {
-      fault = state.find((entry) => entry.remaining > 0 && entry.skip > 0
+      const skipped = state.find((entry) => entry.remaining > 0 && entry.skip > 0
         && entry.rule.method === method && url.pathname.endsWith(entry.rule.pathSuffix));
-      if (fault) fault.skip -= 1;
+      if (skipped) skipped.skip -= 1;
     }
 
     if (fault?.rule.phase === "before") {
