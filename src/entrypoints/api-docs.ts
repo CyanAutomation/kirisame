@@ -173,7 +173,7 @@ function resolveSchema(schema: unknown, seenReferences = new Set<string>()): unk
     }
   }
 
-  return Object.fromEntries(Object.entries(schema).map(([key, value]) => [key, resolveSchema(value, seenReferences)]));
+  return Object.fromEntries(Object.entries(schema).map(([key, value]) => [key, resolveSchema(value, new Set(seenReferences))]));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
