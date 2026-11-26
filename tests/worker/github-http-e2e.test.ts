@@ -9,6 +9,7 @@ import { RealGitHubAdapter } from "../../src/github/RealGitHubAdapter.js";
 import type { PullRequestRecord } from "../../src/github/types.js";
 import { PublicationService } from "../../src/publication/service.js";
 import { generateTestGitHubAppKeys } from "./github-test-utils.js";
+import { createScriptedHttpFetch, type HttpFaultRule } from "./support/scripted-http.js";
 
 const fixedNow = 1_800_000_000_000;
 
@@ -33,7 +34,10 @@ describe("HTTP-backed GitHub publication", () => {
 
   it("reconciles a lost branch-create response without repeating the ref mutation", async () => {
     const request = await makeRequest("branch");
-    const backend = await createHttpGitHubBackend(request.repository, { loseMutationResponse: "/git/refs" });
+    const backend = await createHttpGitHubBackend(request.repository, [{
+      method: "POST", pathSuffix: "/git/refs", phase: "after", times: 1,
+      effect: { kind: "reject", message: "Synthetic GitHub connection closed after ref creation." },
+    }]);
     const adapter = new RealGitHubAdapter(backend.keys.credentials, { fetch: backend.fetch, now: () => fixedNow });
     const service = new PublicationService(adapter);
 
@@ -45,7 +49,10 @@ describe("HTTP-backed GitHub publication", () => {
 
   it("reconciles a timeout after PR creation without issuing a duplicate PR", async () => {
     const request = await makeRequest("pr");
-    const backend = await createHttpGitHubBackend(request.repository, { loseMutationResponse: "/pulls" });
+    const backend = await createHttpGitHubBackend(request.repository, [{
+      method: "POST", pathSuffix: "/pulls", phase: "after", times: 1,
+      effect: { kind: "reject", message: "Synthetic GitHub connection closed after pull request creation." },
+    }]);
     const adapter = new RealGitHubAdapter(backend.keys.credentials, { fetch: backend.fetch, now: () => fixedNow });
     const service = new PublicationService(adapter);
 
@@ -53,6 +60,24 @@ describe("HTTP-backed GitHub publication", () => {
 
     expect(result.outcome).toBe("pr_published");
     expect(result.pullRequest?.state).toBe("open");
+    expect(backend.calls.filter((call) => call.method === "POST" && call.path.endsWith("/pulls"))).toHaveLength(1);
+  });
+
+  it("preserves GitHub Retry-After across a pre-mutation rate limit and succeeds on replay", async () => {
+    const request = await makeRequest("pr");
+    const backend = await createHttpGitHubBackend(request.repository, [{
+      method: "POST", pathSuffix: "/pulls", phase: "before", times: 1,
+      effect: { kind: "response", status: 429, body: "rate limited", headers: { "retry-after": "45" } },
+    }]);
+    const adapter = new RealGitHubAdapter(backend.keys.credentials, { fetch: backend.fetch, now: () => fixedNow });
+    const service = new PublicationService(adapter);
+
+    const deferred = await service.publish(request);
+    expect(deferred.error).toMatchObject({ code: "RECONCILIATION_REQUIRED", retryAfterSeconds: 45 });
+    expect(backend.calls.filter((call) => call.method === "POST" && call.path.endsWith("/pulls"))).toHaveLength(0);
+
+    const replay = await service.publish(request);
+    expect(replay.outcome).toBe("pr_published");
     expect(backend.calls.filter((call) => call.method === "POST" && call.path.endsWith("/pulls"))).toHaveLength(1);
   });
 
@@ -83,7 +108,7 @@ async function makeRequest(mode: "branch" | "pr"): Promise<PublicationRequest> {
 
 async function createHttpGitHubBackend(
   repository: Repository,
-  options: { loseMutationResponse?: string } = {},
+  faults: readonly HttpFaultRule[] = [],
 ) {
   const keys = await generateTestGitHubAppKeys();
   const state = new MockGitHubAdapter();
@@ -92,18 +117,8 @@ async function createHttpGitHubBackend(
   request.artifact.repository = repository;
   await state.seedForRequest(request);
   const calls: Array<{ method: string; path: string }> = [];
-  let lostMutationResponse = options.loseMutationResponse;
-
-  function loseAfterMutation(path: string, response: Response): Response {
-    if (lostMutationResponse && path.endsWith(lostMutationResponse)) {
-      lostMutationResponse = undefined;
-      throw new Error("simulated lost response after remote mutation");
-    }
-    return response;
-  }
-
-  const context = { repository, state, calls, loseAfterMutation };
-  const fetch: typeof globalThis.fetch = (input, init) => handleHttpRequest(input, init, context);
+  const context = { repository, state, calls };
+  const fetch = createScriptedHttpFetch((input, init) => handleHttpRequest(input, init, context), faults);
 
   return { keys, calls, fetch };
 }
@@ -112,7 +127,6 @@ interface HttpGitHubContext {
   repository: Repository;
   state: MockGitHubAdapter;
   calls: Array<{ method: string; path: string }>;
-  loseAfterMutation(path: string, response: Response): Response;
 }
 
 interface HttpRequestData {
@@ -150,7 +164,7 @@ async function handleRepositoryHttpRequest(request: HttpRequestData, context: Ht
   try {
     const response = await dispatchRepositoryRequest(suffix, request, context);
     if (!response) return json({ message: "Not found" }, 404);
-    return request.method === "POST" ? context.loseAfterMutation(request.path, response) : response;
+    return response;
   } catch (error) {
     return simulatedApiError(error);
   }
