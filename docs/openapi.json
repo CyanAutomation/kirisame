@@ -1,0 +1,231 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Kirisame API",
+    "version": "1",
+    "description": "Public HTTP API for Kirisame service metadata, liveness, readiness, and API documentation. This is the first version of the public HTTP contract and is independent of the Worker build version and the private publication request contractVersion. Unmatched paths return a 404 ErrorResponse. Publication is available only through the authenticated private Cloudflare Service Binding RPC described in the repository's Soyuz integration guide; it is not a public HTTP operation."
+  },
+  "servers": [
+    { "url": "/", "description": "The current Kirisame origin" }
+  ],
+  "tags": [
+    { "name": "Diagnostics", "description": "Service metadata, liveness, and readiness." },
+    { "name": "Documentation", "description": "Human-readable and machine-readable API documentation." }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "getServiceInfo",
+        "tags": ["Diagnostics"],
+        "summary": "Get service metadata",
+        "description": "Returns sanitized service identity, publishing availability, and deployment version metadata.",
+        "responses": {
+          "200": {
+            "description": "Service metadata.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ServiceInfo" },
+                "example": {
+                  "service": "kirisame",
+                  "implementation": "github-app-publisher",
+                  "publishing": "available",
+                  "version": {
+                    "sourceCommit": "0123456789abcdef0123456789abcdef01234567",
+                    "application": "0.1.0",
+                    "contract": "1",
+                    "builtAt": "2026-11-22T20:45:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "405": { "$ref": "#/components/responses/MethodNotAllowed" }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "tags": ["Diagnostics"],
+        "summary": "Check liveness",
+        "description": "Returns HTTP 200 while the Worker is responding. This check does not verify publishing configuration.",
+        "responses": {
+          "200": {
+            "description": "The Worker is live.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" },
+                "example": { "status": "ok" }
+              }
+            }
+          },
+          "405": { "$ref": "#/components/responses/MethodNotAllowed" }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "getReadiness",
+        "tags": ["Diagnostics"],
+        "summary": "Check publishing readiness",
+        "description": "Checks local publisher configuration. A ready response does not authenticate a caller or prove that the GitHub App installation is usable.",
+        "responses": {
+          "200": {
+            "description": "The Worker is configured for publishing.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ReadyResponse" },
+                "example": { "status": "ready", "publishing": "available" }
+              }
+            }
+          },
+          "503": {
+            "description": "The Worker is not configured for publishing.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/NotReadyResponse" },
+                "example": { "status": "not_ready", "publishing": "unavailable" }
+              }
+            }
+          },
+          "405": { "$ref": "#/components/responses/MethodNotAllowed" }
+        }
+      }
+    },
+    "/docs": {
+      "get": {
+        "operationId": "getApiReferenceAlias",
+        "tags": ["Documentation"],
+        "summary": "View the API reference",
+        "description": "Alias for the canonical /docs/ page.",
+        "responses": {
+          "200": {
+            "description": "The hand-built HTML API reference.",
+            "content": { "text/html": { "schema": { "type": "string" } } }
+          },
+          "405": { "$ref": "#/components/responses/MethodNotAllowed" }
+        }
+      }
+    },
+    "/docs/": {
+      "get": {
+        "operationId": "getApiReference",
+        "tags": ["Documentation"],
+        "summary": "View the API reference",
+        "description": "Serves a hand-built HTML reference generated from this OpenAPI document.",
+        "responses": {
+          "200": {
+            "description": "The hand-built HTML API reference.",
+            "content": { "text/html": { "schema": { "type": "string" } } }
+          },
+          "405": { "$ref": "#/components/responses/MethodNotAllowed" }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "getOpenApiDocument",
+        "tags": ["Documentation"],
+        "summary": "Download the OpenAPI document",
+        "description": "Returns this OpenAPI 3.1 document as JSON.",
+        "responses": {
+          "200": {
+            "description": "The OpenAPI document.",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          },
+          "405": { "$ref": "#/components/responses/MethodNotAllowed" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ServiceInfo": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["service", "implementation", "publishing", "version"],
+        "properties": {
+          "service": { "type": "string", "const": "kirisame" },
+          "implementation": { "type": "string", "const": "github-app-publisher" },
+          "publishing": { "type": "string", "enum": ["available", "unavailable"] },
+          "version": { "$ref": "#/components/schemas/BuildVersion" }
+        }
+      },
+      "BuildVersion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sourceCommit", "application", "contract", "builtAt"],
+        "properties": {
+          "sourceCommit": { "type": "string", "pattern": "^([a-f0-9]{40}|unknown)$" },
+          "application": { "type": "string", "pattern": "^([0-9A-Za-z.+-]{1,64}|unknown)$" },
+          "contract": { "type": "string", "enum": ["1", "unknown"] },
+          "builtAt": {
+            "oneOf": [
+              { "type": "string", "format": "date-time" },
+              { "type": "string", "const": "unknown" }
+            ]
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": { "status": { "type": "string", "const": "ok" } }
+      },
+      "ReadyResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "publishing"],
+        "properties": {
+          "status": { "type": "string", "const": "ready" },
+          "publishing": { "type": "string", "const": "available" }
+        }
+      },
+      "NotReadyResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "publishing"],
+        "properties": {
+          "status": { "type": "string", "const": "not_ready" },
+          "publishing": { "type": "string", "const": "unavailable" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "enum": ["NOT_FOUND", "METHOD_NOT_ALLOWED"] },
+          "message": { "type": "string", "enum": ["Not found", "Method not allowed"] }
+        }
+      }
+    },
+    "responses": {
+      "MethodNotAllowed": {
+        "description": "The route supports GET only.",
+        "headers": {
+          "Allow": {
+            "description": "Methods supported by this route.",
+            "schema": { "type": "string", "const": "GET" }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "code": "METHOD_NOT_ALLOWED", "message": "Method not allowed" }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "The requested public route does not exist.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "example": { "code": "NOT_FOUND", "message": "Not found" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -235,7 +235,7 @@ Cloudflare D1, Queues or Workflows may be introduced when justified by publicati
 
 ### Service interface
 
-The private interface is a typed Cloudflare Service Binding named `KIRISAME`, with `PublisherEntrypoint.publish(requestJson, callerId, apiKey)`. The key is a separate RPC argument and does not change v1 canonical JSON or its digest. The request is capped at 9 MiB UTF-8 before parsing. The public Worker exposes only `/`, `/health` and `/readyz`; requests to `/internal/v1/publications` return 404 and cannot invoke publication logic.
+The private interface is a typed Cloudflare Service Binding named `KIRISAME`, with `PublisherEntrypoint.publish(requestJson, callerId, apiKey)`. The key is a separate RPC argument and does not change v1 canonical JSON or its digest. The request is capped at 9 MiB UTF-8 before parsing. The public HTTP API exposes `/`, `/health`, `/readyz`, `/docs` (also `/docs/`) and `/openapi.json`; the hand-built HTML reference is generated from the checked-in OpenAPI document at [`docs/openapi.json`](docs/openapi.json). Requests to `/internal/v1/publications` return 404 and cannot invoke publication logic. The OpenAPI document covers the public HTTP interface; private publication RPC remains documented in [Soyuz integration](docs/SOYUZ-INTEGRATION.md).
 
 The code default for `PUBLISHING_ENABLED` remains `false`; production overrides it to `true`. The deployed receiver has no repository allowlist; every caller has a separate Worker API-key secret, and caller policy selects the destination. The test-only binding injects a mock adapter and is not part of the production Worker entrypoint. Kirisame must not expose an unauthenticated public publishing endpoint.
 
