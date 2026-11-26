@@ -1,4 +1,5 @@
 import { isProductionPublishingConfigured } from "../publication/runtime.js";
+import { apiDocsResponse, openApiResponse } from "./api-docs.js";
 
 const SERVICE = "kirisame";
 type PublicRouteHandler = (environment: unknown) => Response | Promise<Response>;
@@ -6,7 +7,11 @@ const PUBLIC_ROUTES: ReadonlyMap<string, PublicRouteHandler> = new Map<string, P
   ["/", rootResponse],
   ["/health", healthResponse],
   ["/readyz", readinessResponse],
+  ["/docs", apiDocsResponse],
+  ["/docs/", apiDocsResponse],
+  ["/openapi.json", openApiResponse],
 ]);
+export const PUBLIC_ROUTE_PATHS = Object.freeze([...PUBLIC_ROUTES.keys()]);
 
 export default {
   async fetch(request: Request, env: unknown = {}): Promise<Response> {
