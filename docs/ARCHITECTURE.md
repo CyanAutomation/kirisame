@@ -1,6 +1,6 @@
 # Kirisame architecture
 
-**Status:** Phase 0.1 contracts, Phase 1.1 publishing hardening, Phase 2A GitHub App authentication/adapter, and authenticated caller-key RPC are implemented and deployed. The authenticated preflight and App-scope probe passed; a replay reused the existing Somatic PR #128. The receiver has no repository allowlist, and only the fixed private canary invoker is currently authorized. Soyuz dispatch remains off pending its caller/host rollout and a new canonical-run canary.
+**Status:** Phase 0.1 contracts, Phase 1.1 publishing hardening, Phase 2A GitHub App authentication/adapter, and authenticated caller-key RPC are implemented. The existing authenticated preflight and PR #128 replay are historical evidence. The latest review could not verify current Worker versions, binding, or caller secrets. Soyuz source declares enabled dispatch and the exact Somatic PR-to-`main` policy; trusted-host readiness and a new canonical-run canary remain pending. See the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md).
 
 ## Intended system
 
@@ -70,7 +70,7 @@ The migration boundary is deliberate: the new Kaseki and future Rusty-Fossil exe
 4. **Kirisame publication service:** Kirisame accepts requests only through authenticated private bindings. It validates the complete v1 request and artifact. It has no repository allowlist; GitHub installation access and permissions limit the operations it can perform. The current App installation selects all repositories, so it does not currently narrow repo selection.
 5. **GitHub:** GitHub is the authority for installed repositories, refs, commit objects, open or closed pull requests, and branch protections. A successful request from Soyuz does not override repository policy or GitHub rules.
 
-The production Worker exposes a separate named typed-RPC `PublisherEntrypoint`; the default public handler cannot dispatch to it. Code defaults are fail-closed. The previous deployed release was restricted to Somatic PRs to `main` and passed its private canary. Kaseki's trusted producer is implemented in source, and Soyuz's private binding is merged with dispatch disabled; host and secret rollout remain. Kirisame has no public publishing route. Caller-supplied validation booleans, executor-supplied authorization, arbitrary artifact URLs, and arbitrary Git or GitHub operations are never accepted.
+The production Worker exposes a separate named typed-RPC `PublisherEntrypoint`; the default public handler cannot dispatch to it. Code defaults are fail-closed. The previous deployed release was restricted to Somatic PRs to `main` and passed its private canary. Kaseki's trusted producer is implemented in source, and Soyuz's checked-in configuration declares the private binding with dispatch enabled; active production settings and host rollout remain to be verified. Kirisame has no public publishing route. Caller-supplied validation booleans, executor-supplied authorization, arbitrary artifact URLs, and arbitrary Git or GitHub operations are never accepted.
 
 ## Publication sequence
 

@@ -1,6 +1,6 @@
 # Security policy
 
-Kirisame is the GitHub write boundary. Phase 0.1 contracts, Phase 1.1 hardening, Phase 2A GitHub App authentication, and the authenticated private RPC are implemented and deployed. The production receiver has no repository allowlist; only the private live-canary invoker is currently authorized, with a fixed Somatic PR-to-`main` policy. The current App installation selects all repositories and has the grants listed below; it does not narrow caller repository choice. Soyuz's authenticated binding source is merged with dispatch disabled; Kaseki's trusted producer still needs host rollout. Keep code defaults fail-closed.
+Kirisame is the GitHub write boundary. It authenticates private RPC callers and intentionally has no receiver-side repository allowlist. Soyuz is the canonical repository-policy authority; its checked-in configuration restricts publication to `CyanAutomation/somatic` pull requests targeting `main`. The App installation selects all CyanAutomation repositories and does not narrow caller repository choice. The current production caller set, Worker settings and binding target were not independently reverified in the latest review; Kaseki producer readiness on the trusted host is also unverified. See the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md) before operational changes. Keep code defaults fail-closed.
 
 ## GitHub App identity and permissions
 
@@ -51,9 +51,9 @@ An API key identifies a service; it is not repository authorization. Never issue
 
 ## Request authentication and provenance
 
-The intended production interface is a private Cloudflare Service Binding. The Worker exports a separate named typed-RPC publisher entrypoint; Soyuz source declares it with dispatch disabled. Do not expose a public publishing route, accept bearer credentials from executors, or trust identity headers supplied by an HTTP caller. The binding must stay on trusted callers only; the public default `fetch()` handler must never dispatch to publication logic.
+The production interface is a private Cloudflare Service Binding. The Worker exports a separate named typed-RPC publisher entrypoint; Soyuz source declares the binding with dispatch enabled. Active production settings must be verified independently because the latest Worker settings request was unavailable. Do not expose a public publishing route, accept bearer credentials from executors, or trust identity headers supplied by an HTTP caller. The binding must stay on trusted callers only; the public default `fetch()` handler must never dispatch to publication logic.
 
-Soyuz must load canonical run state and trusted validation evidence, resolve the requested mode and destination, and authorize one stable publicationId before calling Kirisame. Kirisame verifies that artifact runId, repository, baseRef and baseSha equal the request, and verifies artifactDigest and all file hashes. A caller-supplied validationPassed boolean is never sufficient evidence. Soyuz's ledger, claim-fenced artifacts and intents are implemented; the trusted Kaseki host still needs rollout.
+Soyuz must load canonical run state and trusted validation evidence, resolve the requested mode and destination, and authorize one stable publicationId before calling Kirisame. Kirisame verifies that artifact runId, repository, baseRef and baseSha equal the request, and verifies artifactDigest and all file hashes. A caller-supplied validationPassed boolean is never sufficient evidence. Soyuz's ledger, claim-fenced artifacts and intents are implemented; Kaseki's producer exists in source, but trusted-host deployment and no-dual-publisher evidence remain open gates.
 
 ## Branch and repository operation policy
 

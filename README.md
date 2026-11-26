@@ -6,7 +6,7 @@ Kirisame is a standalone, Cloudflare-native service designed to commit validated
 
 It provides a dedicated boundary between systems that **generate code** and systems authorised to **publish code**.
 
-> **Project status:** Phase 0.1, Phase 1.1 publishing hardening, Phase 2A GitHub App authentication, and Phase 2A.1 GitHub API compatibility are implemented. The production Worker now requires per-caller API keys and has no repository allowlist. Only the private live-canary invoker is currently authorized; it is fixed to `CyanAutomation/somatic` PRs to `main`. Public HTTP remains diagnostics-only. Soyuz's durable publication ledger is deployed. Kaseki's claim-bound manifest producer and Soyuz's private `KIRISAME` binding are implemented in source but still need trusted-host rollout; Soyuz dispatch remains off.
+> **Project status:** Phase 0.1, Phase 1.1 publishing hardening, Phase 2A GitHub App authentication, and Phase 2A.1 GitHub API compatibility are implemented. Kirisame authenticates private Service Binding callers and has no receiver-side repository allowlist; public HTTP remains diagnostics-only. The current deployed caller set, Soyuz binding, Worker versions, and host rollout were not independently reverified in the latest integration review. See the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md) for current evidence and remaining gates.
 
 ## Overview
 
@@ -227,7 +227,7 @@ Kirisame is designed as a lightweight, Cloudflare-native TypeScript service.
 | Component | Purpose |
 |---|---|
 | Cloudflare Workers | Run the public diagnostics and the private, explicitly gated GitHub publisher |
-| Service Bindings | Production has only the private canary invoker; Soyuz source declares `KIRISAME` with dispatch off, pending rollout |
+| Service Bindings | Soyuz source declares private `KIRISAME`; verify the active production binding and caller configuration from the readiness snapshot |
 | Worker Secrets | GitHub App key, Kirisame caller-key map, and one API key per calling Worker; values stay out of source control |
 | Workers Observability | Structured operational logs and diagnostics |
 
@@ -254,7 +254,7 @@ The checked-in configuration includes these fail-closed settings:
 - `KIRISAME_CALLER_KEYS` — Worker secret mapping caller IDs to current and short-lived previous API keys.
 - Caller Workers set a text `KIRISAME_CALLER_ID` and secret `KIRISAME_API_KEY`.
 
-The code default for `PUBLISHING_ENABLED` is `false`. Readiness validates local configuration, including that caller keys exist; it does not authenticate a caller or prove that GitHub's App installation is usable. The live invoker's private preflight and App-scope probe passed. Soyuz's durable ledger and private binding are implemented in source, but dispatch remains off pending the trusted-host rollout and full end-to-end canary. See [Soyuz integration](docs/SOYUZ-INTEGRATION.md).
+The code default for `PUBLISHING_ENABLED` is `false`. Readiness validates local configuration, including that caller keys exist; it does not authenticate a caller or prove that GitHub's App installation is usable. A private preflight and App-scope probe were recorded for the separate live invoker; they do not verify Soyuz's own caller key. Soyuz's source and deployment gates, including its operator-only read-only authentication preflight, are documented in [Soyuz integration](docs/SOYUZ-INTEGRATION.md) and the [current readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md).
 
 Production credentials must never appear in source control, test fixtures, application logs or publication artifacts. See the [GitHub App setup guide](docs/GITHUB-APP.md) before configuring a private canary or rotating the key.
 
@@ -355,7 +355,7 @@ New consumers should integrate through an authorised control-plane interface rat
 - **Implemented:** GitHub adapter interface and deterministic mock publisher. The receiver-side repository allowlist has been removed in the authenticated RPC follow-up.
 - **Implemented:** CI, linting, type checking, contract tests and Worker runtime tests.
 - **Implemented:** Real GitHub writes through the authenticated private named publisher; production has no receiver-side repository allowlist. The public HTTP handler cannot publish.
-- **Pending:** Soyuz's caller secret and trusted-host rollout; Soyuz dispatch remains disabled.
+- **Readiness gate:** Soyuz source declares its authenticated binding and dispatch enabled; active Worker settings, caller secret presence, and binding target still require verification. See the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md).
 
 ### Phase 1.1 — Publishing hardening
 
@@ -377,8 +377,8 @@ New consumers should integrate through an authorised control-plane interface rat
 
 - **Implemented in Soyuz:** Durable publication intents and ledger, request fingerprints, attempt fencing, event history, retry recovery, and manifest retention independent of run culling.
 - **Implemented in source:** Kaseki pins the base SHA, suppresses its legacy publisher for the persisted Kirisame route, and uploads the claim-bound manifest and validation evidence.
-- **Pending:** Roll out the trusted Kaseki producer and authenticated Soyuz binding with dispatch off; enable dispatch only after preflight, caller-policy, and per-run legacy-publisher checks.
-- **Pending:** Run a new claim-bound end-to-end canary and verify identical replay and retention.
+- **Pending:** Verify the current production D1 migration/backfill, active Worker settings, actual Soyuz-to-Kirisame preflight, and trusted-host/no-dual-publisher readiness before a new canary.
+- **Pending:** Run the separate Phase 2C.2 claim-bound canary and verify identical replay and retention using the [current readiness runbook](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md).
 
 ### Phase 4 — Executor migration
 
@@ -449,4 +449,4 @@ Relevant platform documentation:
 
 ---
 
-**Kirisame is CyanAutomation's trusted GitHub publication boundary. The production Worker passed a private Somatic PR canary and an identical replay reused the same PR. Soyuz's durable publication ledger is deployed; Kaseki producer and Soyuz binding source are ready, with host rollout and production dispatch still pending.**
+**Kirisame is CyanAutomation's trusted GitHub publication boundary. The existing isolated Somatic canary and identical replay are historical evidence; the current integration gates and Phase 2C.2 runbook are recorded in the [readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md).**

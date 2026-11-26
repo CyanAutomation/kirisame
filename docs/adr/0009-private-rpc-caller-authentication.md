@@ -1,5 +1,7 @@
 # ADR 0009: Authenticate private publisher callers and delegate repository choice
 
+> This decision records the pre-rollout gate. Current source and deployment evidence are maintained in the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md); the source enables Soyuz dispatch, while current Worker settings and the actual preflight remain unverified.
+
 **Status:** Accepted
 
 ## Context
