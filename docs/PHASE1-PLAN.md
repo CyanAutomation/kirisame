@@ -1,5 +1,7 @@
 # Phase 0.1 through Phase 2A status
 
+> Historical phase plan and commissioning record. The dated observations below are preserved as they were recorded and are not current deployment evidence. For the latest cross-repository status and remaining gates, use the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md).
+
 Phase 0.1 contract hardening, Phase 1 Worker foundations, Phase 1.1 publication hardening, Phase 2A GitHub App integration, and the authenticated caller-key receiver are implemented and deployed. The authenticated preflight and App-scope probe passed, and the canary replay reused PR #128. Production has no receiver-side repository allowlist; only the fixed private live-canary invoker is currently authorized. Soyuz's publication ledger is deployed with migration `0009`; its private binding is implemented in source with dispatch disabled. The Kaseki producer is implemented in source but its trusted-host rollout is pending.
 
 ## Implemented
