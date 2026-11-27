@@ -1,6 +1,6 @@
 # Kirisame architecture
 
-**Status:** Phase 0.1 contracts, Phase 1.1 publishing hardening, Phase 2A GitHub App authentication/adapter, and authenticated caller-key RPC are implemented. The existing authenticated preflight and PR #128 replay are historical evidence. The latest review could not verify current Worker versions, binding, or caller secrets. Soyuz source declares enabled dispatch and the exact Somatic PR-to-`main` policy; trusted-host readiness and a new canonical-run canary remain pending. See the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md).
+**Status:** Phase 0.1 contracts, Phase 1.1 publishing hardening, Phase 2A GitHub App authentication/adapter, and authenticated caller-key RPC are implemented. The existing authenticated preflight and PR #128 replay are historical evidence. The latest review could not verify current Worker versions, binding, or caller secrets. Soyuz source declares enabled dispatch and the exact Somatic PR-to-`main` policy; trusted-host readiness and a new canonical-run canary remain pending. See the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/main/docs/PHASE-2C1-READINESS.md).
 
 ## Intended system
 
