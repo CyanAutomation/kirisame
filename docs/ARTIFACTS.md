@@ -33,7 +33,7 @@ The v1 limits are contract policy:
 
 The base64 representation expands content, which is why the encoded manifest limit is larger than the decoded data limit. Worker request parsing must enforce the raw body cap before buffering or parsing JSON. These ceilings are deliberately below Cloudflare's published ingress maxima and keep memory use bounded. A later size increase requires a measured Worker memory and CPU test and a contract revision.
 
-Soyuz accepts generic artifacts separately from publication manifests. The v1 publication manifest uses the stricter bounds above and is uploaded through the dedicated claim-fenced route. Kaseki source includes the trusted host producer: it constructs one bounded manifest from the workspace pinned to the resolved base SHA. Source availability does not prove host deployment; producer enablement, image provenance and no-dual-publisher evidence remain open gates in the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md).
+Soyuz accepts generic artifacts separately from publication manifests. The v1 publication manifest uses the stricter bounds above and is uploaded through the dedicated claim-fenced route. Kaseki source includes the trusted host producer: it constructs one bounded manifest from the workspace pinned to the resolved base SHA. Source availability does not prove host deployment; producer enablement, image provenance and no-dual-publisher evidence remain open gates in the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/main/docs/PHASE-2C1-READINESS.md).
 
 ## Path and operation validation
 

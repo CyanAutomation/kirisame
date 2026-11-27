@@ -4,7 +4,7 @@
 
 Kirisame uses the CyanAutomation GitHub App, App ID `3345400`, for publication. The production App installation currently selects all repositories. The App owner has accepted the installation scope and current permission grants for commissioning. The App's private key is a Cloudflare Worker secret; its value is not in this repository.
 
-The source publisher authenticates private RPC callers with per-service API keys and has no repository allowlist. Soyuz source declares its private `KIRISAME` binding, caller ID `soyuz`, and enabled dispatch; its repository policy remains Somatic PRs to `main`. The active production caller set, Worker versions, binding, and secret presence were not independently reverified in the latest review. The GitHub App installation and private key must remain unchanged; see the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md) for current evidence.
+The source publisher authenticates private RPC callers with per-service API keys and has no repository allowlist. On 26 November 2026, production settings confirmed Soyuz's private `KIRISAME` binding, caller ID `soyuz`, enabled dispatch, and Somatic PR-to-`main` policy. Kirisame's App ID and publishing gate and both GitHub-related secret bindings are also present; secret values were not read, and the Soyuz-to-Kirisame credential match is not verified. The actual preflight is blocked by the absent separate operator token. The GitHub App installation and private key must remain unchanged; see the [Phase 2C.1 readiness snapshot](https://github.com/CyanAutomation/soyuz/blob/main/docs/PHASE-2C1-READINESS.md) for current evidence.
 
 ## App identity, installation, and permissions
 
@@ -58,7 +58,7 @@ The adapter never returns raw GitHub response bodies. Use access-controlled Clou
 
 ## Staged release and canary
 
-The completed steps below record the earlier isolated Kirisame canary and its commissioning. They are historical evidence, not current verification. Soyuz source now declares dispatch enabled; current production settings and the actual Soyuz-to-Kirisame preflight still require verification. Use the [Phase 2C.2 readiness runbook](https://github.com/CyanAutomation/soyuz/blob/codex/phase-2c1-publication-reliability/docs/PHASE-2C1-READINESS.md) for the next canary.
+The completed steps below record the earlier isolated Kirisame canary and its commissioning. They are historical evidence, not current verification. Current production settings were verified, but actual Soyuz credential authentication and the Kaseki host rollout remain unverified. Use the [Phase 2C.2 readiness runbook](https://github.com/CyanAutomation/soyuz/blob/main/docs/PHASE-2C1-READINESS.md) for the next canary.
 
 The receiver and caller RPC signatures must be deployed as a coordinated rollout. At the time of this earlier sequence, Soyuz dispatch was kept disabled until its caller and producer were ready.
 
